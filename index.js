@@ -11,6 +11,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Environment check
+console.log('🚀 Starting server...');
+console.log('📍 Environment:', process.env.NODE_ENV || 'development');
+console.log('🔌 Port:', PORT);
+
 // CORS configuration
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
