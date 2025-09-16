@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import user from './routes/userRoute.js';
 import imageRoutes from './routes/imageRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
+import { validateBackendEnvironment, getBackendEnvironmentInfo } from './utils/envValidation.js';
 
 // Load environment variables
 dotenv.config();
@@ -11,10 +12,25 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Environment check
+// Environment validation
 console.log('🚀 Starting server...');
-console.log('📍 Environment:', process.env.NODE_ENV || 'development');
-console.log('🔌 Port:', PORT);
+const envValidation = validateBackendEnvironment();
+const envInfo = getBackendEnvironmentInfo();
+
+console.log('📍 Environment:', envInfo.nodeEnv);
+console.log('🔌 Port:', envInfo.port);
+console.log('🌐 Frontend URL:', envInfo.frontendUrl);
+
+if (!envValidation.isValid) {
+  console.error('❌ Environment validation failed:');
+  envValidation.errors.forEach(error => console.error(`   • ${error}`));
+  process.exit(1);
+}
+
+if (envValidation.warnings.length > 0) {
+  console.warn('⚠️  Environment warnings:');
+  envValidation.warnings.forEach(warning => console.warn(`   • ${warning}`));
+}
 
 // CORS configuration
 app.use(cors({
