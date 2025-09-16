@@ -1,7 +1,7 @@
 import express from 'express';
 import { upload } from '../utils/cloudinary.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
-import { PrismaClient } from '../generated/prisma/index.js';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
