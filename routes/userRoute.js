@@ -1,5 +1,5 @@
 import express from 'express';
-import { signUp, login, getProfile, updateProfile, logout, debugUsers, validateToken } from '../controllers/userController.js';
+import { signUp, login, getProfile, updateProfile, logout, validateToken } from '../controllers/userController.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 
 const user = express.Router();
@@ -8,9 +8,6 @@ const user = express.Router();
 user.post('/signup', signUp);
 user.post('/login', login);
 user.post('/logout', logout);
-
-// Debug route (remove in production)
-user.get('/debug-users', debugUsers);
 
 // Token validation route
 user.get('/validate-token', authenticateToken, validateToken);

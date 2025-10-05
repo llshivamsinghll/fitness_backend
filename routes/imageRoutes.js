@@ -20,35 +20,41 @@ imageRoutes.post('/upload-profile-images',
         });
       }
 
-      // Extract image URLs from uploaded files
+      // Extract image URLs from uploaded files and create records
       const imageUrls = req.files.map(file => file.path);
-      
-      // Update user's profile images in database
-      const updatedUser = await prisma.user.update({
+
+      // Remove old images and insert new ones
+      await prisma.profileImage.deleteMany({ where: { userId: req.user.id } });
+      await prisma.profileImage.createMany({
+        data: imageUrls.map((url, idx) => ({
+          userId: req.user.id,
+          imageUrl: url,
+          type: ['front','side','back'][idx] || 'other'
+        }))
+      });
+
+      const updatedUser = await prisma.user.findUnique({
         where: { id: req.user.id },
-        data: { profileImages: imageUrls },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          height: true,
-          weight: true,
-          age: true,
-          gender: true,
-          fitnessGoal: true,
-          dietPreference: true,
-          activityLevel: true,
-          medicalConditions: true,
-          profileImages: true,
-          createdAt: true,
-          updatedAt: true
-        }
+        include: { profile: true, images: true }
       });
 
       res.json({
         success: true,
         message: 'Profile images uploaded successfully',
-        user: updatedUser,
+        user: {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          height: updatedUser.profile?.height ?? null,
+          weight: updatedUser.profile?.weight ?? null,
+          age: updatedUser.profile?.age ?? null,
+          gender: updatedUser.profile?.gender ?? null,
+          fitnessGoal: updatedUser.profile?.fitnessGoal ?? null,
+          dietPreference: updatedUser.profile?.dietPreference ?? null,
+          activityLevel: updatedUser.profile?.activityLevel ?? null,
+          medicalConditions: updatedUser.profile?.medicalConditions ?? null,
+          profileImages: (updatedUser.images || []).map(i => i.imageUrl)
+        },
         imageUrls: imageUrls
       });
 
@@ -68,32 +74,30 @@ imageRoutes.delete('/profile-images',
   authenticateToken,
   async (req, res) => {
     try {
-      // Update user to remove profile images
-      const updatedUser = await prisma.user.update({
+      await prisma.profileImage.deleteMany({ where: { userId: req.user.id } });
+
+      const updatedUser = await prisma.user.findUnique({
         where: { id: req.user.id },
-        data: { profileImages: [] },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          height: true,
-          weight: true,
-          age: true,
-          gender: true,
-          fitnessGoal: true,
-          dietPreference: true,
-          activityLevel: true,
-          medicalConditions: true,
-          profileImages: true,
-          createdAt: true,
-          updatedAt: true
-        }
+        include: { profile: true, images: true }
       });
 
       res.json({
         success: true,
         message: 'Profile images deleted successfully',
-        user: updatedUser
+        user: {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          height: updatedUser.profile?.height ?? null,
+          weight: updatedUser.profile?.weight ?? null,
+          age: updatedUser.profile?.age ?? null,
+          gender: updatedUser.profile?.gender ?? null,
+          fitnessGoal: updatedUser.profile?.fitnessGoal ?? null,
+          dietPreference: updatedUser.profile?.dietPreference ?? null,
+          activityLevel: updatedUser.profile?.activityLevel ?? null,
+          medicalConditions: updatedUser.profile?.medicalConditions ?? null,
+          profileImages: (updatedUser.images || []).map(i => i.imageUrl)
+        }
       });
 
     } catch (error) {

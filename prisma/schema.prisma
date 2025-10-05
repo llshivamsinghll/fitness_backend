@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,28 +7,55 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
-  id    Int     @id @default(autoincrement())
-  name  String
-  email String  @unique
-  password String
-  
-  // Profile Information
-  height Float?  // in cm
-  weight Float?  // in kg
-  age    Int?
-  gender String? // "Male", "Female", "Other"
-  
-  // Fitness Information
-  fitnessGoal     String? // "Lose Fat", "Build Muscle", "Maintain", "Endurance", "Strength"
-  dietPreference  String? // "Vegetarian", "Non-Vegetarian", "Vegan", "Keto", "Paleo", "Mediterranean"
-  activityLevel   String? // "Sedentary", "Lightly Active", "Moderately Active", "Very Active", "Extremely Active"
-  
-  // Medical & Additional Info
-  medicalConditions String? // Optional text field for conditions/restrictions
-  profileImages     String[] // Array of image URLs (front, side, back)
-  
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  password  String
+
+  profile   Profile?
+  images    ProfileImage[]
+  plans     Plan[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Profile {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  name              String?  // User's display name
+  height            Float?   // cm
+  weight            Float?   // kg
+  age               Int?
+  gender            String?  // "Male", "Female", "Other"
+  fitnessGoal       String?  // "Lose Fat", "Build Muscle", etc.
+  dietPreference    String?  // "Veg", "Non-Veg", etc.
+  activityLevel     String?  // "Sedentary", "Active", etc.
+  medicalConditions String?  // Optional text field for health conditions
+  planDuration      Int?     // Desired plan duration in weeks
+
+  user              User     @relation(fields: [userId], references: [id])
+}
+
+model ProfileImage {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  imageUrl  String
+  type      String   // "front", "side", "back"
+
+  user      User     @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+}
+
+model Plan {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  workout    Json     // JSON object for structured plan
+  diet       Json     // JSON object for structured plan
+  duration   Int?     // Plan duration in weeks (4, 8, 12, etc.)
+  version    Int      @default(1)
+
+  user       User     @relation(fields: [userId], references: [id])
+  createdAt  DateTime @default(now())
 }

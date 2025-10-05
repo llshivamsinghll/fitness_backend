@@ -3,6 +3,28 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
 const prisma = new PrismaClient();
+
+// Helper to shape user response to match previous API (flatten profile fields and images)
+function toUserResponse(u) {
+  const profile = u.profile || {};
+  const images = (u.images || []).map(i => i.imageUrl);
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    height: profile.height ?? null,
+    weight: profile.weight ?? null,
+    age: profile.age ?? null,
+    gender: profile.gender ?? null,
+    fitnessGoal: profile.fitnessGoal ?? null,
+    dietPreference: profile.dietPreference ?? null,
+    activityLevel: profile.activityLevel ?? null,
+    medicalConditions: profile.medicalConditions ?? null,
+    planDuration: profile.planDuration ?? null,
+    profileImages: images
+  };
+}
+
 export const signUp = async (req, res) => {
   const { name, email, password } = req.body;
   // Add your user creation logic here
@@ -20,7 +42,15 @@ export const signUp = async (req, res) => {
     data: {
       name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      // Create an empty profile to simplify later updates
+      profile: {
+        create: {}
+      }
+    },
+    include: {
+      profile: true,
+      images: true
     }
   });
 
@@ -33,22 +63,19 @@ export const signUp = async (req, res) => {
   res.status(201).json({
     message: 'User created successfully',
     token,
-    user: {
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email
-    }
+    user: toUserResponse(newUser)
   });
-
-
-}
+};
 
 export const login = async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "All fields are required" });
   }
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ 
+    where: { email },
+    include: { profile: true, images: true }
+  });
   if (!user) {
     return res.status(400).json({ error: "User does not exist" });
   }
@@ -67,41 +94,11 @@ export const login = async (req, res) => {
   return res.status(200).json({ 
     message: "Login successful", 
     token,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      height: user.height,
-      weight: user.weight,
-      age: user.age,
-      gender: user.gender,
-      fitnessGoal: user.fitnessGoal,
-      dietPreference: user.dietPreference,
-      activityLevel: user.activityLevel,
-      medicalConditions: user.medicalConditions,
-      profileImages: user.profileImages
-    }
+    user: toUserResponse(user)
   });
-
-}
-
-// Debug endpoint to list users (remove in production)
-export const debugUsers = async (req, res) => {
-  try {
-    const users = await prisma.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        createdAt: true
-      }
-    });
-    res.json({ users, count: users.length });
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Failed to fetch users' });
-  }
 };
+
+
 
 // Validate token endpoint
 export const validateToken = async (req, res) => {
@@ -109,7 +106,7 @@ export const validateToken = async (req, res) => {
     // If we reach here, the token is valid (middleware passed)
     res.json({ 
       valid: true, 
-      user: req.user,
+      user: { id: req.user.id, name: req.user.name, email: req.user.email },
       message: 'Token is valid' 
     });
   } catch (error) {
@@ -123,24 +120,11 @@ export const validateToken = async (req, res) => {
 // Get user profile (protected route)
 export const getProfile = async (req, res) => {
   try {
-    // req.user is set by authenticateToken middleware
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        height: true,
-        weight: true,
-        age: true,
-        gender: true,
-        fitnessGoal: true,
-        dietPreference: true,
-        activityLevel: true,
-        medicalConditions: true,
-        profileImages: true,
-        createdAt: true,
-        updatedAt: true
+      include: {
+        profile: true,
+        images: true
       }
     });
 
@@ -148,7 +132,7 @@ export const getProfile = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.status(200).json({ user });
+    res.status(200).json({ user: toUserResponse(user) });
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Failed to get user profile' });
@@ -167,49 +151,55 @@ export const updateProfile = async (req, res) => {
       fitnessGoal, 
       dietPreference, 
       activityLevel, 
-      medicalConditions 
+      medicalConditions,
+      planDuration 
     } = req.body;
     
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
 
-    // Prepare update data - only include fields that are provided
-    const updateData = { name };
-    
-    if (height !== undefined) updateData.height = parseFloat(height) || null;
-    if (weight !== undefined) updateData.weight = parseFloat(weight) || null;
-    if (age !== undefined) updateData.age = parseInt(age) || null;
-    if (gender !== undefined) updateData.gender = gender || null;
-    if (fitnessGoal !== undefined) updateData.fitnessGoal = fitnessGoal || null;
-    if (dietPreference !== undefined) updateData.dietPreference = dietPreference || null;
-    if (activityLevel !== undefined) updateData.activityLevel = activityLevel || null;
-    if (medicalConditions !== undefined) updateData.medicalConditions = medicalConditions || null;
-
-    const updatedUser = await prisma.user.update({
+    // Upsert profile data and update user name
+    const updated = await prisma.user.update({
       where: { id: req.user.id },
-      data: updateData,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        height: true,
-        weight: true,
-        age: true,
-        gender: true,
-        fitnessGoal: true,
-        dietPreference: true,
-        activityLevel: true,
-        medicalConditions: true,
-        profileImages: true,
-        createdAt: true,
-        updatedAt: true
+      data: {
+        name,
+        profile: {
+          upsert: {
+            create: {
+              height: height !== undefined ? (parseFloat(height) || null) : undefined,
+              weight: weight !== undefined ? (parseFloat(weight) || null) : undefined,
+              age: age !== undefined ? (parseInt(age) || null) : undefined,
+              gender: gender ?? undefined,
+              fitnessGoal: fitnessGoal ?? undefined,
+              dietPreference: dietPreference ?? undefined,
+              activityLevel: activityLevel ?? undefined,
+              medicalConditions: medicalConditions ?? undefined,
+              planDuration: planDuration !== undefined ? (parseInt(planDuration) || null) : undefined
+            },
+            update: {
+              height: height !== undefined ? (parseFloat(height) || null) : undefined,
+              weight: weight !== undefined ? (parseFloat(weight) || null) : undefined,
+              age: age !== undefined ? (parseInt(age) || null) : undefined,
+              gender: gender ?? undefined,
+              fitnessGoal: fitnessGoal ?? undefined,
+              dietPreference: dietPreference ?? undefined,
+              activityLevel: activityLevel ?? undefined,
+              medicalConditions: medicalConditions ?? undefined,
+              planDuration: planDuration !== undefined ? (parseInt(planDuration) || null) : undefined
+            }
+          }
+        }
+      },
+      include: {
+        profile: true,
+        images: true
       }
     });
 
     res.status(200).json({ 
       message: 'Profile updated successfully',
-      user: updatedUser 
+      user: toUserResponse(updated)
     });
   } catch (error) {
     console.error('Update profile error:', error);

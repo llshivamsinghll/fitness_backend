@@ -52,4 +52,10 @@ router.get('/quick-tips', aiController.getQuickTips);
 // Exercise Alternatives
 router.post('/exercise-alternatives', aiRateLimit, aiController.getExerciseAlternatives);
 
+// Generate both plans and save
+router.post('/generate-and-save', aiRateLimit, aiController.generateAndSavePlan);
+
+// Get latest saved plan
+router.get('/latest-plan', aiController.getLatestPlan);
+
 export default router;

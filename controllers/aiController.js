@@ -1,25 +1,29 @@
 import aiService from '../utils/aiService.js';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 // Generate personalized workout recommendations
 export const getWorkoutRecommendations = async (req, res) => {
   try {
     const { age, weight, height, fitnessGoal, activityLevel, workoutPreference, injuries } = req.body;
     
-    // Validate required fields
-    if (!age || !weight || !height || !fitnessGoal || !activityLevel) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: age, weight, height, fitnessGoal, activityLevel' 
-      });
-    }
+    // Get user's complete profile from database
+    const dbProfile = await prisma.profile.findUnique({
+      where: { userId: req.user.id }
+    });
     
+    // Use database profile data with request body as fallback
     const userProfile = {
-      age: parseInt(age),
-      weight: parseFloat(weight),
-      height: parseFloat(height),
-      fitnessGoal,
-      activityLevel,
-      workoutPreference: workoutPreference || 'mixed',
-      injuries: injuries || []
+      age: parseInt(dbProfile?.age || age),
+      weight: parseFloat(dbProfile?.weight || weight),
+      height: parseFloat(dbProfile?.height || height),
+      gender: dbProfile?.gender || 'not-specified',
+      fitnessGoal: dbProfile?.fitnessGoal || fitnessGoal,
+      activityLevel: dbProfile?.activityLevel || activityLevel,
+      workoutPreference: dbProfile?.workoutPreference || workoutPreference || 'mixed',
+      injuries: dbProfile?.injuries || injuries || [],
+      name: dbProfile?.name || 'User'
     };
     
     const recommendations = await aiService.getWorkoutRecommendations(userProfile);
@@ -52,21 +56,23 @@ export const getMealPlanRecommendations = async (req, res) => {
       allergies 
     } = req.body;
     
-    // Validate required fields
-    if (!age || !weight || !height || !fitnessGoal || !activityLevel) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: age, weight, height, fitnessGoal, activityLevel' 
-      });
-    }
+    // Get user's complete profile from database
+    const dbProfile = await prisma.profile.findUnique({
+      where: { userId: req.user.id }
+    });
     
+    // Use database profile data with request body as fallback
     const userProfile = {
-      age: parseInt(age),
-      weight: parseFloat(weight),
-      height: parseFloat(height),
-      fitnessGoal,
-      activityLevel,
+      age: parseInt(dbProfile?.age || age),
+      weight: parseFloat(dbProfile?.weight || weight),
+      height: parseFloat(dbProfile?.height || height),
+      gender: dbProfile?.gender || 'not-specified',
+      fitnessGoal: dbProfile?.fitnessGoal || fitnessGoal,
+      activityLevel: dbProfile?.activityLevel || activityLevel,
+      dietPreference: dbProfile?.dietPreference || 'none',
       dietaryRestrictions: dietaryRestrictions || [],
-      allergies: allergies || []
+      allergies: allergies || [],
+      name: dbProfile?.name || 'User'
     };
     
     const mealPlan = await aiService.getMealPlanRecommendations(userProfile);
@@ -272,6 +278,92 @@ export const getExerciseAlternatives = async (req, res) => {
   }
 };
 
+// Generate both workout and meal plan, then save as a Plan record
+export const generateAndSavePlan = async (req, res) => {
+  try {
+    const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, planDuration, name } = req.body;
+
+    if (!age || !weight || !height || !fitnessGoal || !activityLevel) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: age, weight, height, fitnessGoal, activityLevel' 
+      });
+    }
+
+    // Get user's complete profile from database
+    const userProfile = await prisma.profile.findUnique({
+      where: { userId: req.user.id }
+    });
+    
+    // If no profile exists, use request data as fallback, otherwise prefer database profile
+    const completeProfile = {
+      age: parseInt(userProfile?.age || age) || 25,
+      weight: parseFloat(userProfile?.weight || weight) || 70,
+      height: parseFloat(userProfile?.height || height) || 170,
+      gender: userProfile?.gender || gender || 'not-specified',
+      fitnessGoal: userProfile?.fitnessGoal || fitnessGoal || 'general-fitness',
+      activityLevel: userProfile?.activityLevel || activityLevel || 'moderate',
+      dietPreference: userProfile?.dietPreference || dietPreference || 'none',
+      duration: parseInt(userProfile?.planDuration || planDuration) || 8,
+      name: userProfile?.name || name || 'User',
+      workoutPreference: userProfile?.workoutPreference || 'mixed',
+      injuries: userProfile?.injuries || [],
+      medicalConditions: userProfile?.medicalConditions || 'none'
+    };
+
+    console.log('Using complete profile for AI generation:', completeProfile);
+
+    // Generate in parallel, passing complete profile to AI service
+    const [workout, diet] = await Promise.all([
+      aiService.getWorkoutRecommendations(completeProfile),
+      aiService.getMealPlanRecommendations(completeProfile)
+    ]);
+
+    // Determine next version
+    const lastPlan = await prisma.plan.findFirst({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' }
+    });
+    const nextVersion = (lastPlan?.version || 0) + 1;
+
+    const saved = await prisma.plan.create({
+      data: {
+        userId: req.user.id,
+        workout,
+        diet,
+        duration: completeProfile.duration || 8,
+        version: nextVersion
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Plan generated and saved successfully',
+      plan: saved
+    });
+  } catch (error) {
+    console.error('Error generating/saving plan:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate and save plan',
+      details: error.message 
+    });
+  }
+};
+
+// Get most recent saved plan for the authenticated user
+export const getLatestPlan = async (req, res) => {
+  try {
+    const plan = await prisma.plan.findFirst({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (!plan) return res.status(404).json({ error: 'No plan found' });
+    res.json({ success: true, plan });
+  } catch (error) {
+    console.error('Error fetching latest plan:', error);
+    res.status(500).json({ error: 'Failed to fetch latest plan' });
+  }
+};
+
 export default {
   getWorkoutRecommendations,
   getMealPlanRecommendations,
@@ -279,5 +371,7 @@ export default {
   analyzeProgress,
   analyzeExerciseForm,
   getQuickTips,
-  getExerciseAlternatives
+  getExerciseAlternatives,
+  generateAndSavePlan,
+  getLatestPlan
 };

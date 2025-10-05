@@ -1,0 +1,405 @@
+import Groq from 'groq-sdk';
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
+
+// Helper function to make AI calls with error handling
+const makeAICall = async (messages, temperature = 0.7) => {
+  try {
+    const completion = await groq.chat.completions.create({
+      messages,
+      model: "llama-3.1-8b-instant",
+      temperature,
+      max_tokens: 2048,
+    });
+    
+    return completion.choices[0]?.message?.content;
+  } catch (error) {
+    console.error('Groq AI API Error:', error);
+    throw new Error('AI service temporarily unavailable');
+  }
+};
+
+export const getWorkoutRecommendations = async (userProfile) => {
+  const { age, weight, height, gender, fitnessGoal, activityLevel, workoutPreference, injuries = [], duration = 8, name } = userProfile;
+
+  const messages = [
+    {
+      role: "system",
+      content: "You are an expert fitness coach. Output strictly valid JSON only. No markdown, no prose, no explanations."
+    },
+    {
+      role: "user",
+      content: `Create a personalized ${duration}-week workout plan for ${name || 'this user'}:
+Profile: ${age} years old, ${gender || 'unspecified gender'}, ${weight}kg, ${height}cm
+Goal: ${fitnessGoal}
+Activity Level: ${activityLevel}
+Workout Preference: ${workoutPreference || 'mixed'}
+Injuries/Limitations: ${injuries.join(', ') || 'None'}
+
+Consider gender-specific recommendations, age-appropriate exercises, and goal-specific programming.`per function to make AI calls with error handling
+const makeAICall = async (messages, temperature = 0.7) => {
+  try {
+    const completion = await groq.chat.completions.create({
+      messages,
+      model: "llama-3.1-8b-instant", // Updated to working model
+      temperature,
+      max_tokens: 2048,
+    });
+    
+    return completion.choices[0]?.message?.content;
+  } catch (error) {
+    console.error('Groq AI API Error:', error);
+    throw new Error('AI service temporarily unavailable');
+  }
+};
+
+// --- JSON parsing helpers ----------------------------------------------------
+const stripCodeFences = (text = '') => {
+  let t = text.trim();
+  if (t.startsWith('```')) {
+    // Remove leading ```json or ``` and trailing ```
+    t = t.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+  }
+  return t.trim();
+};
+
+const extractBalancedJSON = (text = '') => {
+  // Try to extract first balanced JSON object or array from text
+  const firstObj = text.indexOf('{');
+  const firstArr = text.indexOf('[');
+  let start = -1;
+  let isArray = false;
+  if (firstObj !== -1 && (firstArr === -1 || firstObj < firstArr)) start = firstObj;
+  else if (firstArr !== -1) { start = firstArr; isArray = true; }
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') depth--;
+    if (depth === 0) {
+      const candidate = text.slice(start, i + 1);
+      try { return JSON.parse(candidate); } catch { /* continue */ }
+    }
+  }
+  return null;
+};
+
+const parseJSONSafely = (raw, fallback = {}) => {
+  if (!raw) return { ok: false, data: fallback, raw };
+  const stripped = stripCodeFences(raw);
+  try {
+    return { ok: true, data: JSON.parse(stripped), raw };
+  } catch {
+    const extracted = extractBalancedJSON(stripped);
+    if (extracted) return { ok: true, data: extracted, raw };
+    return { ok: false, data: fallback, raw };
+  }
+};
+
+const ensureWorkoutShape = (obj, duration = 8) => {
+  if (!obj || typeof obj !== 'object') return null;
+  // Accept a variety of keys but normalize minimally
+  const normalized = {
+    durationWeeks: obj.durationWeeks || duration,
+    phases: obj.phases || obj.weeks || [],
+    weekly_plan: obj.weekly_plan || undefined,
+    recommendations: obj.recommendations || obj.tips || [],
+    meta: obj.meta || undefined,
+  };
+  return normalized;
+};
+
+const ensureMealShape = (obj, dailyCalories) => {
+  if (!obj || typeof obj !== 'object') return null;
+  const normalized = {
+    daily_targets: obj.daily_targets || {
+      calories: dailyCalories,
+    },
+    meals: obj.meals || obj.days || [],
+    tips: obj.tips || [],
+    shopping_list: obj.shopping_list || obj.shopping || [],
+    meta: obj.meta || undefined,
+  };
+  return normalized;
+};
+
+// Generate personalized workout recommendations
+export const getWorkoutRecommendations = async (userProfile) => {
+  const { age, weight, height, fitnessGoal, activityLevel, workoutPreference, injuries = [], duration = 8 } = userProfile;
+
+  const messages = [
+    {
+      role: "system",
+      content: "You are an expert fitness coach. Output strictly valid JSON only. No markdown, no prose, no explanations."
+    },
+    {
+      role: "user",
+      content: `Create a structured ${duration}-week workout plan for:
+Age: ${age} years; Weight: ${weight}kg; Height: ${height}cm; Goal: ${fitnessGoal}; Activity: ${activityLevel}; Preference: ${workoutPreference}; Injuries: ${injuries.join(', ') || 'None'}.
+
+Return ONLY JSON matching this schema (no extra keys):
+{
+  "durationWeeks": ${duration},
+  "phases": [
+    {
+      "name": "Foundation Phase",
+      "weeks": "1-2",
+      "days": [
+        {
+          "name": "Day 1",
+          "focus": "Upper Body",
+          "exercises": [
+            { "name": "Bench Press", "sets": 3, "reps": "8-12", "rest": "60-90s", "notes": "Form cues" }
+          ]
+        }
+      ]
+    }
+  ],
+  "weekly_plan": { "frequency": "3-4/week", "rest_days": "Every other day", "progression": "+5% load weekly" },
+  "recommendations": ["Warm up 5-10 minutes", "Prioritize form"]
+}`
+    }
+  ];
+
+  const response = await makeAICall(messages, 0.2);
+  console.log('Raw AI Workout Response:', response);
+
+  const parsed = parseJSONSafely(response, null);
+  if (parsed.ok) {
+    const normalized = ensureWorkoutShape(parsed.data, duration);
+    if (normalized) return normalized;
+  }
+  // Fallback minimal structured object embedding raw text
+  return {
+    durationWeeks: duration,
+    phases: [],
+    weekly_plan: { frequency: "3-4/week" },
+    recommendations: ["Content could not be fully structured"],
+    raw: response || null,
+  };
+};
+
+// Generate personalized meal plans
+export const getMealPlanRecommendations = async (userProfile) => {
+  const { age, weight, height, fitnessGoal, activityLevel, dietaryRestrictions = [], allergies = [], duration = 8 } = userProfile;
+  
+  // Calculate approximate daily calories needed
+  const bmr = weight * 22; // Simplified BMR calculation
+  const activityMultiplier = {
+    'sedentary': 1.2,
+    'light': 1.375,
+    'moderate': 1.55,
+    'active': 1.725,
+    'very_active': 1.9
+  };
+  const dailyCalories = Math.round(bmr * (activityMultiplier[activityLevel] || 1.4));
+  
+  const messages = [
+    {
+      role: "system",
+      content: "You are a certified nutritionist. Output strictly valid JSON only. No markdown, no prose, no explanations."
+    },
+    {
+      role: "user",
+      content: `Create a structured daily meal plan (within a ${duration}-week program) for:
+Age: ${age}; Weight: ${weight}kg; Height: ${height}cm; Goal: ${fitnessGoal}; Activity: ${activityLevel}; Target Calories: ~${dailyCalories}; Restrictions: ${dietaryRestrictions.join(', ') || 'None'}; Allergies: ${allergies.join(', ') || 'None'}.
+
+Return ONLY JSON matching this schema (no extra keys):
+{
+  "daily_targets": { "calories": ${dailyCalories}, "protein": 150, "carbs": 220, "fat": 70, "fiber": 25 },
+  "meals": [
+    {
+      "meal_type": "Breakfast",
+      "foods": [
+        { "name": "Oatmeal", "quantity": "1 cup", "calories": 150, "protein": 5, "carbs": 27, "fat": 3 }
+      ],
+      "total_calories": 350,
+      "prep_time": "10 minutes"
+    }
+  ],
+  "tips": ["Hydrate well", "Time protein evenly"],
+  "shopping_list": ["Oats", "Eggs", "Chicken", "Rice", "Vegetables"]
+}`
+    }
+  ];
+
+  const response = await makeAICall(messages, 0.2);
+  console.log('Raw AI Diet Response:', response);
+
+  const parsed = parseJSONSafely(response, null);
+  if (parsed.ok) {
+    const normalized = ensureMealShape(parsed.data, dailyCalories);
+    if (normalized) return normalized;
+  }
+  return {
+    daily_targets: { calories: dailyCalories },
+    meals: [],
+    tips: ["Content could not be fully structured"],
+    shopping_list: [],
+    raw: response || null,
+  };
+};
+
+// AI Fitness Coach Chat
+export const getFitnessCoachAdvice = async (question, userContext = {}) => {
+  const messages = [
+    {
+      role: "system",
+      content: `You are an experienced fitness coach and nutritionist. Provide helpful, motivational, and scientifically-backed advice in structured JSON format.`
+    },
+    {
+      role: "user",
+      content: `Question: "${question}"
+      User Context: ${JSON.stringify(userContext)}
+      
+      Respond with JSON in this format:
+      {
+        "response_type": "advice/tip/explanation/motivation",
+        "main_answer": "Direct answer to the question",
+        "key_points": [
+          {
+            "title": "Point title",
+            "description": "Detailed explanation",
+            "importance": "High/Medium/Low"
+          }
+        ],
+        "action_steps": ["Step 1", "Step 2", "Step 3"],
+        "pro_tips": ["Expert tip 1", "Expert tip 2"],
+        "safety_notes": ["Safety consideration if applicable"],
+        "motivation": "Encouraging closing message"
+      }`
+    }
+  ];
+  
+  const response = await makeAICall(messages, 0.8);
+  
+  try {
+    return JSON.parse(response);
+  } catch (error) {
+    // If JSON parsing fails, return structured fallback
+    return {
+      response_type: "advice",
+      main_answer: response,
+      key_points: [],
+      action_steps: [],
+      pro_tips: ["Stay consistent with your fitness journey!"],
+      safety_notes: [],
+      motivation: "You've got this! Keep pushing towards your goals! 💪"
+    };
+  }
+};
+
+// Progress Analysis and Recommendations
+export const analyzeProgress = async (progressData) => {
+  const { workoutHistory, weightHistory, goalProgress, timeframe } = progressData;
+  
+  const messages = [
+    {
+      role: "system",
+      content: "You are a fitness analyst. Analyze user progress data and provide actionable insights and recommendations."
+    },
+    {
+      role: "user",
+      content: `Analyze my fitness progress and provide recommendations:
+      
+      Workout History (last ${timeframe}): ${JSON.stringify(workoutHistory)}
+      Weight Progress: ${JSON.stringify(weightHistory)}
+      Goal Progress: ${JSON.stringify(goalProgress)}
+      
+      Provide analysis in JSON format:
+      {
+        "progress_summary": "Overall assessment",
+        "strengths": ["What's going well"],
+        "areas_for_improvement": ["What needs work"],
+        "recommendations": [
+          {
+            "category": "Workout/Nutrition/Recovery",
+            "suggestion": "Specific recommendation",
+            "priority": "High/Medium/Low"
+          }
+        ],
+        "motivation": "Encouraging message"
+      }`
+    }
+  ];
+  
+  const response = await makeAICall(messages, 0.6);
+  
+  try {
+    return JSON.parse(response);
+  } catch (error) {
+    return {
+      progress_summary: response,
+      recommendations: [{
+        category: "General",
+        suggestion: "Keep up the consistent effort!",
+        priority: "Medium"
+      }]
+    };
+  }
+};
+
+// Form and Technique Analysis
+export const analyzeExerciseForm = async (exerciseName, userFeedback) => {
+  const messages = [
+    {
+      role: "system",
+      content: "You are a certified personal trainer specializing in proper exercise form and injury prevention. Provide structured form guidance."
+    },
+    {
+      role: "user",
+      content: `Analyze form for ${exerciseName}. User feedback: "${userFeedback}"
+      
+      Respond with JSON in this format:
+      {
+        "exercise": "${exerciseName}",
+        "form_checklist": [
+          {
+            "step": "Setup position",
+            "description": "How to position yourself",
+            "key_focus": "What to pay attention to"
+          }
+        ],
+        "common_mistakes": [
+          {
+            "mistake": "Common error",
+            "why_avoid": "Why this is problematic",
+            "correction": "How to fix it"
+          }
+        ],
+        "modifications": {
+          "beginner": ["Easier variation 1", "Easier variation 2"],
+          "advanced": ["Challenging variation 1", "Challenging variation 2"]
+        },
+        "safety_tips": ["Safety point 1", "Safety point 2"],
+        "progression": "How to advance with this exercise"
+      }`
+    }
+  ];
+  
+  const response = await makeAICall(messages, 0.7);
+  
+  try {
+    return JSON.parse(response);
+  } catch (error) {
+    return {
+      exercise: exerciseName,
+      form_checklist: [],
+      common_mistakes: [],
+      modifications: { beginner: [], advanced: [] },
+      safety_tips: ["Always maintain proper form", "Start with lighter weights"],
+      progression: response
+    };
+  }
+};
+
+export default {
+  getWorkoutRecommendations,
+  getMealPlanRecommendations,
+  getFitnessCoachAdvice,
+  analyzeProgress,
+  analyzeExerciseForm
+};
