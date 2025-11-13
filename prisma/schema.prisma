@@ -13,9 +13,13 @@ model User {
   email     String    @unique
   password  String
 
-  profile   Profile?
-  images    ProfileImage[]
-  plans     Plan[]
+  profile          Profile?
+  images           ProfileImage[]
+  plans            Plan[]
+  workoutLogs      WorkoutLog[]        @relation("WorkoutLogs")
+  bodyMeasurements BodyMeasurement[]   @relation("BodyMeasurements")
+  achievements     Achievement[]       @relation("Achievements")
+  personalRecords  PersonalRecord[]    @relation("PersonalRecords")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -34,6 +38,8 @@ model Profile {
   activityLevel     String?  // "Sedentary", "Active", etc.
   medicalConditions String?  // Optional text field for health conditions
   planDuration      Int?     // Desired plan duration in weeks
+  location          String?  // User's location/region (country, city, or region)
+  cuisine           String?  // Preferred cuisine style (e.g., "Indian", "Mediterranean", "Asian")
 
   user              User     @relation(fields: [userId], references: [id])
 }
@@ -58,4 +64,69 @@ model Plan {
 
   user       User     @relation(fields: [userId], references: [id])
   createdAt  DateTime @default(now())
+}
+
+model WorkoutLog {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  exerciseName    String
+  sets            Int
+  reps            Int
+  weight          Float?   // Weight used in kg
+  duration        Int?     // Duration in seconds
+  notes           String?
+  difficulty      String?  // "Easy", "Medium", "Hard"
+  completedAt     DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], name: "WorkoutLogs")
+  
+  @@index([userId, completedAt])
+}
+
+model BodyMeasurement {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  weight          Float?   // kg
+  bodyFat         Float?   // percentage
+  muscleMass      Float?   // kg
+  chest           Float?   // cm
+  waist           Float?   // cm
+  hips            Float?   // cm
+  biceps          Float?   // cm
+  thighs          Float?   // cm
+  notes           String?
+  measuredAt      DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], name: "BodyMeasurements")
+  
+  @@index([userId, measuredAt])
+}
+
+model Achievement {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  type            String   // "WORKOUT_STREAK", "WEIGHT_MILESTONE", "EXERCISE_PR", etc.
+  title           String
+  description     String
+  icon            String?  // Icon identifier
+  unlockedAt      DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], name: "Achievements")
+  
+  @@index([userId, unlockedAt])
+}
+
+model PersonalRecord {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  exerciseName    String
+  recordType      String   // "MAX_WEIGHT", "MAX_REPS", "TOTAL_VOLUME"
+  value           Float
+  unit            String   // "kg", "reps", "kg*reps"
+  achievedAt      DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], name: "PersonalRecords")
+  
+  @@index([userId, exerciseName])
+  @@unique([userId, exerciseName, recordType])
 }

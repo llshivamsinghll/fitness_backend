@@ -8,16 +8,35 @@ export const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-    console.log('AuthMiddleware: Authorization header:', authHeader ? 'Present' : 'Missing');
-    console.log('AuthMiddleware: Token extracted:', token ? 'Yes' : 'No');
-
-    if (!token) {
-      console.log('AuthMiddleware: No token provided');
-      return res.status(401).json({ error: 'Access token required' });
+    const isDev = process.env.NODE_ENV === 'development';
+    
+    if (isDev) {
+      console.log('[AUTH] AuthMiddleware:', {
+        hasAuthHeader: !!authHeader,
+        hasToken: !!token,
+        path: req.path
+      });
     }
 
+    if (!token) {
+      console.log('[AUTH] AuthMiddleware: No token provided for path:', req.path);
+      return res.status(401).json({ 
+        error: 'Access token required',
+        message: 'Please login to access this resource'
+      });
+    }
+
+    // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('AuthMiddleware: Token decoded, userId:', decoded.userId);
+    
+    if (!decoded || !decoded.userId) {
+      console.log('[AUTH] AuthMiddleware: Invalid token structure');
+      return res.status(401).json({ error: 'Invalid token format' });
+    }
+    
+    if (isDev) {
+      console.log('[AUTH] AuthMiddleware: Token verified for userId:', decoded.userId);
+    }
     
     // Get user details from database
     const user = await prisma.user.findUnique({
@@ -25,22 +44,48 @@ export const authenticateToken = async (req, res, next) => {
       select: { id: true, name: true, email: true } // Exclude password
     });
 
-    console.log('AuthMiddleware: User found in DB:', !!user);
     if (!user) {
-      console.log('AuthMiddleware: User not found for userId:', decoded.userId);
-      return res.status(401).json({ error: 'Invalid token - user not found' });
+      console.log('[AUTH] AuthMiddleware: User not found in DB for userId:', decoded.userId);
+      return res.status(401).json({ 
+        error: 'Invalid token',
+        message: 'User no longer exists'
+      });
     }
 
     req.user = user; // Attach user to request
     next();
   } catch (error) {
+    console.error('[ERROR] AuthMiddleware error:', error.message);
+    
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Token expired' });
+      return res.status(401).json({ 
+        error: 'Token expired',
+        message: 'Your session has expired. Please login again.',
+        code: 'TOKEN_EXPIRED'
+      });
     }
+    
     if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ error: 'Invalid token' });
+      return res.status(401).json({ 
+        error: 'Invalid token',
+        message: 'Authentication token is invalid',
+        code: 'INVALID_TOKEN'
+      });
     }
-    return res.status(500).json({ error: 'Authentication failed' });
+    
+    if (error.name === 'NotBeforeError') {
+      return res.status(401).json({ 
+        error: 'Token not active',
+        message: 'Token is not yet active',
+        code: 'TOKEN_NOT_ACTIVE'
+      });
+    }
+    
+    return res.status(500).json({ 
+      error: 'Authentication failed',
+      message: 'An error occurred during authentication',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 

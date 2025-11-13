@@ -72,7 +72,9 @@ export const getMealPlanRecommendations = async (req, res) => {
       dietPreference: dbProfile?.dietPreference || 'none',
       dietaryRestrictions: dietaryRestrictions || [],
       allergies: allergies || [],
-      name: dbProfile?.name || 'User'
+      name: dbProfile?.name || 'User',
+      location: dbProfile?.location || null,
+      cuisine: dbProfile?.cuisine || null
     };
     
     const mealPlan = await aiService.getMealPlanRecommendations(userProfile);
@@ -294,7 +296,7 @@ export const generateAndSavePlan = async (req, res) => {
       where: { userId: req.user.id }
     });
     
-    // If no profile exists, use request data as fallback, otherwise prefer database profile
+    // Use database profile data with request body as fallback
     const completeProfile = {
       age: parseInt(userProfile?.age || age) || 25,
       weight: parseFloat(userProfile?.weight || weight) || 70,
@@ -307,7 +309,9 @@ export const generateAndSavePlan = async (req, res) => {
       name: userProfile?.name || name || 'User',
       workoutPreference: userProfile?.workoutPreference || 'mixed',
       injuries: userProfile?.injuries || [],
-      medicalConditions: userProfile?.medicalConditions || 'none'
+      medicalConditions: userProfile?.medicalConditions || 'none',
+      location: userProfile?.location || null,
+      cuisine: userProfile?.cuisine || null
     };
 
     console.log('Using complete profile for AI generation:', completeProfile);

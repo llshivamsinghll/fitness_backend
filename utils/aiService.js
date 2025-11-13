@@ -304,7 +304,15 @@ Return ONLY this JSON structure:
 };
 
 export const getMealPlanRecommendations = async (userProfile) => {
-  const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, name, medicalConditions, duration } = userProfile;
+  const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, name, medicalConditions, duration, location, cuisine } = userProfile;
+
+  console.log('[AI] Meal Plan Generation - User Profile:', { 
+    location, 
+    cuisine, 
+    dietPreference,
+    name,
+    fitnessGoal 
+  });
 
   const bmr = gender === 'male' 
     ? 88.362 + (13.397 * weight) + (4.799 * height) - (5.677 * age)
@@ -312,24 +320,62 @@ export const getMealPlanRecommendations = async (userProfile) => {
   
   const dailyCalories = Math.round(bmr * 1.55);
 
+  // Determine regional cuisine preferences
+  const regionalContext = location || cuisine || 'International';
+  console.log('[AI] Regional Context for Meal Plan:', regionalContext);
+  const cuisineGuidance = `
+🌍 CRITICAL REQUIREMENT - REGIONAL CUISINE:
+You MUST create ALL meals exclusively from ${regionalContext} cuisine.
+
+MANDATORY REGIONAL REQUIREMENTS:
+✓ Use ONLY traditional ${regionalContext} dishes and recipes
+✓ Use ONLY ingredients commonly available in ${regionalContext} local markets
+✓ Follow ${regionalContext} cooking methods and techniques
+✓ Include ${regionalContext} traditional spices, herbs, and seasonings
+✓ Follow ${regionalContext} cultural meal patterns and timing
+✓ Name dishes in local ${regionalContext} language when appropriate
+${dietPreference === 'vegetarian' || dietPreference === 'vegan' ? `✓ STRICTLY follow ${dietPreference} dietary restrictions` : ''}
+${dietPreference === 'non-vegetarian' ? `✓ Include ${regionalContext} traditional meat, fish, and poultry dishes` : ''}
+
+Example: If region is "India", use dishes like Dosa, Idli, Dal, Roti, Paneer, etc.
+Example: If region is "Italy", use dishes like Pasta, Risotto, Bruschetta, etc.
+Example: If region is "Japan", use dishes like Miso Soup, Onigiri, Teriyaki, etc.`;
+
   const messages = [
     {
       role: "system",
-      content: "You are a certified nutritionist. You must respond with ONLY valid JSON. No explanations, no markdown, no text outside the JSON object."
+      content: `You are a certified nutritionist specializing in ${regionalContext} cuisine. You MUST create meal plans using ONLY traditional ${regionalContext} dishes, ingredients, and cooking methods. You must respond with ONLY valid JSON. No explanations, no markdown, no text outside the JSON object.`
     },
     {
       role: "user",
-      content: `Create a personalized meal plan for ${name || 'user'}:
-Profile: ${age}yo ${gender}, ${weight}kg, ${height}cm
-Goal: ${fitnessGoal}
-Activity Level: ${activityLevel}
-Diet Preference: ${dietPreference || 'none'}
-Medical Conditions: ${medicalConditions || 'None'}
-Plan Duration: ${duration} weeks
-Target Calories: ${dailyCalories}
+      content: `Create a personalized meal plan using EXCLUSIVELY ${regionalContext} cuisine for ${name || 'user'}:
+
+USER PROFILE:
+- Age: ${age} years old
+- Gender: ${gender}
+- Weight: ${weight} kg
+- Height: ${height} cm
+- Fitness Goal: ${fitnessGoal}
+- Activity Level: ${activityLevel}
+- Diet Preference: ${dietPreference || 'none'}
+- Region/Location: ${regionalContext}
+- Medical Conditions: ${medicalConditions || 'None'}
+- Plan Duration: ${duration} weeks
+- Target Daily Calories: ${dailyCalories}
+
+${cuisineGuidance}
+
+MEAL PLAN REQUIREMENTS:
+- Create a weekly meal plan with 4-5 meals per day
+- ALL meals MUST be from ${regionalContext} cuisine ONLY
+- Use traditional ${regionalContext} dish names
+- Include breakfast, lunch, dinner, and snacks typical to ${regionalContext} culture
+- Use ingredients commonly found in ${regionalContext} local markets
+- Follow ${regionalContext} traditional cooking methods
 
 Return ONLY this JSON structure:
 {
+  "region": "${regionalContext}",
   "daily_targets": {
     "calories": ${dailyCalories},
     "protein": 150,
@@ -337,18 +383,29 @@ Return ONLY this JSON structure:
     "fat": 75,
     "fiber": 25
   },
-  "meals": [
+  "weekly_plan": [
     {
-      "meal_type": "Breakfast",
-      "total_calories": 400,
-      "prep_time": "10 minutes",
-      "foods": [
-        {"name": "Oatmeal", "quantity": "1 cup", "calories": 150, "protein": 5, "carbs": 27, "fat": 3}
+      "day": 1,
+      "meals": [
+        {
+          "meal_type": "Breakfast",
+          "name": "Traditional ${regionalContext} breakfast dish",
+          "total_calories": 400,
+          "protein": 20,
+          "carbs": 45,
+          "fat": 15,
+          "prep_time": "15 minutes",
+          "foods": [
+            {"name": "Local ingredient 1", "quantity": "1 cup", "calories": 150, "protein": 5, "carbs": 27, "fat": 3}
+          ],
+          "recipe_notes": "Brief cooking instructions using local methods"
+        }
       ]
     }
   ],
-  "tips": ["Stay hydrated", "Eat every 3-4 hours"],
-  "shopping_list": ["Oats", "Eggs", "Chicken", "Vegetables"]
+  "regional_tips": ["Hydration tips for ${regionalContext} climate", "Local eating habits", "Meal timing based on ${regionalContext} culture"],
+  "shopping_list": ["Local ingredients commonly found in ${regionalContext} markets"],
+  "meal_prep_tips": ["Tips specific to ${regionalContext} cooking methods"]
 }`
     }
   ];
