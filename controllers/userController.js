@@ -3,8 +3,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
 const prisma = new PrismaClient();
-
-// Helper to shape user response to match previous API (flatten profile fields and images)
+// Keep API responses backward-compatible by flattening selected profile fields.
 function toUserResponse(u) {
   const profile = u.profile || {};
   const images = (u.images || []).map(i => i.imageUrl);
@@ -21,6 +20,9 @@ function toUserResponse(u) {
     activityLevel: profile.activityLevel ?? null,
     medicalConditions: profile.medicalConditions ?? null,
     planDuration: profile.planDuration ?? null,
+    location: profile.location ?? null,
+    state: profile.state ?? null,
+    cuisine: profile.cuisine ?? null,
     profileImages: images
   };
 }
@@ -28,40 +30,26 @@ function toUserResponse(u) {
 export const signUp = async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    
-    console.log('[AUTH] Signup attempt:', { email, hasName: !!name, hasPassword: !!password });
-    
-    // Validation
     if (!name || !email || !password) {
       console.warn('[AUTH] Signup failed: Missing required fields');
       return res.status(400).json({ error: "All fields are required" });
     }
-    
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       console.warn('[AUTH] Signup failed: Invalid email format');
       return res.status(400).json({ error: "Invalid email format" });
     }
-    
-    // Password strength validation
     if (password.length < 6) {
       console.warn('[AUTH] Signup failed: Password too short');
       return res.status(400).json({ error: "Password must be at least 6 characters long" });
     }
-    
-    // Check if user exists
     const existingUser = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
     if (existingUser) {
       console.warn('[AUTH] Signup failed: User already exists for email:', email);
       return res.status(400).json({ error: "User already exists" });
     }
-    
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Create user
     const newUser = await prisma.user.create({
       data: {
         name: name.trim(),
@@ -76,15 +64,11 @@ export const signUp = async (req, res) => {
         images: true
       }
     });
-
-    // Generate token
     const token = jwt.sign(
       { userId: newUser.id, email: newUser.email },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
     );
-
-    console.log('[AUTH] Signup successful for user:', email);
 
     res.status(201).json({
       message: 'User created successfully',
@@ -93,8 +77,6 @@ export const signUp = async (req, res) => {
     });
   } catch (error) {
     console.error('[ERROR] Signup error:', error);
-    
-    // Handle specific Prisma errors
     if (error.code === 'P2002') {
       return res.status(400).json({ error: "Email already in use" });
     }
@@ -108,28 +90,16 @@ export const signUp = async (req, res) => {
 
 export const login = async (req, res) => {
   try {
-    console.log('[AUTH] Login attempt:', { 
-      email: req.body?.email, 
-      hasPassword: !!req.body?.password,
-      timestamp: new Date().toISOString()
-    });
-    
     const { email, password } = req.body;
-    
-    // Validation
     if (!email || !password) {
       console.warn('[AUTH] Login failed: Missing required fields');
       return res.status(400).json({ error: "Email and password are required" });
     }
-    
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       console.warn('[AUTH] Login failed: Invalid email format');
       return res.status(400).json({ error: "Invalid email format" });
     }
-    
-    // Find user
     const user = await prisma.user.findUnique({ 
       where: { email: email.toLowerCase().trim() },
       include: { profile: true, images: true }
@@ -137,28 +107,18 @@ export const login = async (req, res) => {
     
     if (!user) {
       console.warn('[AUTH] Login failed: User not found for email:', email);
-      // Use generic error message to prevent user enumeration
       return res.status(401).json({ error: "Invalid email or password" });
     }
-    
-    // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       console.warn('[AUTH] Login failed: Invalid password for email:', email);
-      // Use generic error message to prevent user enumeration
       return res.status(401).json({ error: "Invalid email or password" });
     }
-    
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
     );
-    
-    console.log('[AUTH] Login successful for user:', email);
-    
-    // Return complete user profile data
     return res.status(200).json({ 
       message: "Login successful", 
       token,
@@ -166,11 +126,6 @@ export const login = async (req, res) => {
     });
   } catch (error) {
     console.error('[ERROR] Login error:', error);
-    console.error('  Error details:', {
-      message: error.message,
-      code: error.code,
-      name: error.name
-    });
     
     return res.status(500).json({ 
       error: "Login failed. Please try again.",
@@ -178,13 +133,8 @@ export const login = async (req, res) => {
     });
   }
 };
-
-
-
-// Validate token endpoint
 export const validateToken = async (req, res) => {
   try {
-    // If we reach here, the token is valid (middleware passed)
     res.json({ 
       valid: true, 
       user: { id: req.user.id, name: req.user.name, email: req.user.email },
@@ -197,8 +147,6 @@ export const validateToken = async (req, res) => {
     });
   }
 };
-
-// Get user profile (protected route)
 export const getProfile = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -219,12 +167,8 @@ export const getProfile = async (req, res) => {
     res.status(500).json({ error: 'Failed to get user profile' });
   }
 };
-
-// Update user profile (protected route)
 export const updateProfile = async (req, res) => {
   try {
-    console.log('[PROFILE] Profile update for user:', req.user.email);
-    
     const { 
       name, 
       height, 
@@ -237,15 +181,12 @@ export const updateProfile = async (req, res) => {
       medicalConditions,
       planDuration,
       location,
+      state,
       cuisine
     } = req.body;
-    
-    // Validation
     if (!name || name.trim().length === 0) {
       return res.status(400).json({ error: 'Name is required' });
     }
-    
-    // Validate numeric fields
     if (height !== undefined && height !== null) {
       const heightNum = parseFloat(height);
       if (isNaN(heightNum) || heightNum <= 0 || heightNum > 300) {
@@ -267,7 +208,21 @@ export const updateProfile = async (req, res) => {
       }
     }
 
-    // Upsert profile data and update user name
+    // Build once so create/update paths stay aligned and easier to maintain.
+    const baseProfileData = {
+      height: height !== undefined ? (parseFloat(height) || null) : undefined,
+      weight: weight !== undefined ? (parseFloat(weight) || null) : undefined,
+      age: age !== undefined ? (parseInt(age) || null) : undefined,
+      gender: gender ?? undefined,
+      fitnessGoal: fitnessGoal ?? undefined,
+      dietPreference: dietPreference ?? undefined,
+      activityLevel: activityLevel ?? undefined,
+      medicalConditions: medicalConditions ?? undefined,
+      planDuration: planDuration !== undefined ? (parseInt(planDuration) || null) : undefined,
+      location: location ?? undefined,
+      cuisine: cuisine ?? undefined
+    };
+
     const updated = await prisma.user.update({
       where: { id: req.user.id },
       data: {
@@ -275,30 +230,12 @@ export const updateProfile = async (req, res) => {
         profile: {
           upsert: {
             create: {
-              height: height !== undefined ? (parseFloat(height) || null) : undefined,
-              weight: weight !== undefined ? (parseFloat(weight) || null) : undefined,
-              age: age !== undefined ? (parseInt(age) || null) : undefined,
-              gender: gender ?? undefined,
-              fitnessGoal: fitnessGoal ?? undefined,
-              dietPreference: dietPreference ?? undefined,
-              activityLevel: activityLevel ?? undefined,
-              medicalConditions: medicalConditions ?? undefined,
-              planDuration: planDuration !== undefined ? (parseInt(planDuration) || null) : undefined,
-              location: location ?? undefined,
-              cuisine: cuisine ?? undefined
+              ...baseProfileData,
+              state: state ?? undefined
             },
             update: {
-              height: height !== undefined ? (parseFloat(height) || null) : undefined,
-              weight: weight !== undefined ? (parseFloat(weight) || null) : undefined,
-              age: age !== undefined ? (parseInt(age) || null) : undefined,
-              gender: gender ?? undefined,
-              fitnessGoal: fitnessGoal ?? undefined,
-              dietPreference: dietPreference ?? undefined,
-              activityLevel: activityLevel ?? undefined,
-              medicalConditions: medicalConditions ?? undefined,
-              planDuration: planDuration !== undefined ? (parseInt(planDuration) || null) : undefined,
-              location: location ?? undefined,
-              cuisine: cuisine ?? undefined
+              ...baseProfileData,
+              state: state ?? undefined
             }
           }
         }
@@ -308,8 +245,6 @@ export const updateProfile = async (req, res) => {
         images: true
       }
     });
-
-    console.log('[PROFILE] Profile updated successfully for user:', req.user.email);
 
     res.status(200).json({ 
       message: 'Profile updated successfully',
@@ -324,11 +259,8 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-// Logout (optional - mainly for token blacklisting if implemented)
 export const logout = async (req, res) => {
   try {
-    // In a stateless JWT system, logout is mainly client-side
-    // You could implement token blacklisting here if needed
     res.status(200).json({ 
       message: 'Logged out successfully' 
     });

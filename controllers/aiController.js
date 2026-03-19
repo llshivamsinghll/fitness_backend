@@ -2,18 +2,13 @@ import aiService from '../utils/aiService.js';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-
-// Generate personalized workout recommendations
 export const getWorkoutRecommendations = async (req, res) => {
   try {
     const { age, weight, height, fitnessGoal, activityLevel, workoutPreference, injuries } = req.body;
-    
-    // Get user's complete profile from database
     const dbProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
-    
-    // Use database profile data with request body as fallback
+    // Prefer stored profile data and only fall back to request payload values when missing.
     const userProfile = {
       age: parseInt(dbProfile?.age || age),
       weight: parseFloat(dbProfile?.weight || weight),
@@ -42,8 +37,6 @@ export const getWorkoutRecommendations = async (req, res) => {
     });
   }
 };
-
-// Generate personalized meal plans
 export const getMealPlanRecommendations = async (req, res) => {
   try {
     const { 
@@ -55,13 +48,10 @@ export const getMealPlanRecommendations = async (req, res) => {
       dietaryRestrictions, 
       allergies 
     } = req.body;
-    
-    // Get user's complete profile from database
     const dbProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
-    
-    // Use database profile data with request body as fallback
+    // Keep meal generation stable by prioritizing persisted profile fields over ad-hoc request values.
     const userProfile = {
       age: parseInt(dbProfile?.age || age),
       weight: parseFloat(dbProfile?.weight || weight),
@@ -93,8 +83,6 @@ export const getMealPlanRecommendations = async (req, res) => {
     });
   }
 };
-
-// AI Fitness Coach Chat
 export const getFitnessCoachAdvice = async (req, res) => {
   try {
     const { question, userContext } = req.body;
@@ -104,8 +92,6 @@ export const getFitnessCoachAdvice = async (req, res) => {
         error: 'Question is required' 
       });
     }
-    
-    // Limit question length for safety
     if (question.length > 500) {
       return res.status(400).json({ 
         error: 'Question too long. Please keep it under 500 characters.' 
@@ -132,8 +118,6 @@ export const getFitnessCoachAdvice = async (req, res) => {
     });
   }
 };
-
-// Analyze user progress and provide recommendations
 export const analyzeProgress = async (req, res) => {
   try {
     const { workoutHistory, weightHistory, goalProgress, timeframe } = req.body;
@@ -167,8 +151,6 @@ export const analyzeProgress = async (req, res) => {
     });
   }
 };
-
-// Analyze exercise form and provide guidance
 export const analyzeExerciseForm = async (req, res) => {
   try {
     const { exerciseName, userFeedback } = req.body;
@@ -202,13 +184,12 @@ export const analyzeExerciseForm = async (req, res) => {
     });
   }
 };
-
-// Get quick fitness tips
 export const getQuickTips = async (req, res) => {
   try {
     const { category, userLevel } = req.query;
     
     const validCategories = ['workout', 'nutrition', 'recovery', 'motivation', 'general'];
+    // Clamp category to a known set so prompt generation cannot drift into unsupported buckets.
     const selectedCategory = validCategories.includes(category) ? category : 'general';
     
     let question = `Give me 3 quick ${selectedCategory} tips`;
@@ -236,8 +217,6 @@ export const getQuickTips = async (req, res) => {
     });
   }
 };
-
-// Get AI-powered exercise alternatives
 export const getExerciseAlternatives = async (req, res) => {
   try {
     const { exerciseName, reason, equipment } = req.body;
@@ -279,24 +258,18 @@ export const getExerciseAlternatives = async (req, res) => {
     });
   }
 };
-
-// Generate both workout and meal plan, then save as a Plan record
 export const generateAndSavePlan = async (req, res) => {
   try {
-    const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, planDuration, name } = req.body;
+    const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, planDuration, name, location, state, cuisine } = req.body;
 
     if (!age || !weight || !height || !fitnessGoal || !activityLevel) {
       return res.status(400).json({ 
         error: 'Missing required fields: age, weight, height, fitnessGoal, activityLevel' 
       });
     }
-
-    // Get user's complete profile from database
     const userProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
-    
-    // Use database profile data with request body as fallback
     const completeProfile = {
       age: parseInt(userProfile?.age || age) || 25,
       weight: parseFloat(userProfile?.weight || weight) || 70,
@@ -310,30 +283,43 @@ export const generateAndSavePlan = async (req, res) => {
       workoutPreference: userProfile?.workoutPreference || 'mixed',
       injuries: userProfile?.injuries || [],
       medicalConditions: userProfile?.medicalConditions || 'none',
-      location: userProfile?.location || null,
-      cuisine: userProfile?.cuisine || null
+      location: userProfile?.location || location || null,
+      state: userProfile?.state || state || null,
+      cuisine: userProfile?.cuisine || cuisine || null
     };
-
-    console.log('Using complete profile for AI generation:', completeProfile);
-
-    // Generate in parallel, passing complete profile to AI service
     const [workout, diet] = await Promise.all([
       aiService.getWorkoutRecommendations(completeProfile),
       aiService.getMealPlanRecommendations(completeProfile)
     ]);
 
-    // Determine next version
+    // Normalize AI output before persisting so plan payload shape stays consistent across versions.
+    const safeDiet = {
+      schemaVersion: Number(diet?.schemaVersion) || 2,
+      region: diet?.region || null,
+      daily_targets: {
+        calories: Number(diet?.daily_targets?.calories) || 0,
+        protein: Number(diet?.daily_targets?.protein) || 0,
+        carbs: Number(diet?.daily_targets?.carbs) || 0,
+        fat: Number(diet?.daily_targets?.fat) || 0,
+        fiber: Number(diet?.daily_targets?.fiber) || 0
+      },
+      weekly_plan: Array.isArray(diet?.weekly_plan) ? diet.weekly_plan : [],
+      meals: Array.isArray(diet?.meals) ? diet.meals : [],
+      tips: Array.isArray(diet?.tips) ? diet.tips : [],
+      shopping_list: Array.isArray(diet?.shopping_list) ? diet.shopping_list : []
+    };
     const lastPlan = await prisma.plan.findFirst({
       where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' }
     });
+    // Increment version per user so history remains ordered and reversible.
     const nextVersion = (lastPlan?.version || 0) + 1;
 
     const saved = await prisma.plan.create({
       data: {
         userId: req.user.id,
         workout,
-        diet,
+        diet: safeDiet,
         duration: completeProfile.duration || 8,
         version: nextVersion
       }
@@ -352,8 +338,6 @@ export const generateAndSavePlan = async (req, res) => {
     });
   }
 };
-
-// Get most recent saved plan for the authenticated user
 export const getLatestPlan = async (req, res) => {
   try {
     const plan = await prisma.plan.findFirst({

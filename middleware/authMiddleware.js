@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const token = authHeader && authHeader.split(' ')[1];
 
     const isDev = process.env.NODE_ENV === 'development';
     
@@ -25,8 +25,6 @@ export const authenticateToken = async (req, res, next) => {
         message: 'Please login to access this resource'
       });
     }
-
-    // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     if (!decoded || !decoded.userId) {
@@ -37,11 +35,9 @@ export const authenticateToken = async (req, res, next) => {
     if (isDev) {
       console.log('[AUTH] AuthMiddleware: Token verified for userId:', decoded.userId);
     }
-    
-    // Get user details from database
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, name: true, email: true } // Exclude password
+      select: { id: true, name: true, email: true }
     });
 
     if (!user) {
@@ -52,7 +48,7 @@ export const authenticateToken = async (req, res, next) => {
       });
     }
 
-    req.user = user; // Attach user to request
+    req.user = user;
     next();
   } catch (error) {
     console.error('[ERROR] AuthMiddleware error:', error.message);
@@ -105,7 +101,6 @@ export const optionalAuth = async (req, res, next) => {
     
     next();
   } catch (error) {
-    // For optional auth, we continue even if token is invalid
     next();
   }
 };

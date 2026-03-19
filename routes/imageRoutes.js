@@ -6,11 +6,9 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const imageRoutes = express.Router();
-
-// Upload profile images (up to 3 files: front, side, back)
 imageRoutes.post('/upload-profile-images', 
   authenticateToken,
-  upload.array('images', 3), // Allow up to 3 images
+  upload.array('images', 3),
   async (req, res) => {
     try {
       if (!req.files || req.files.length === 0) {
@@ -19,11 +17,7 @@ imageRoutes.post('/upload-profile-images',
           message: 'No images uploaded' 
         });
       }
-
-      // Extract image URLs from uploaded files and create records
       const imageUrls = req.files.map(file => file.path);
-
-      // Remove old images and insert new ones
       await prisma.profileImage.deleteMany({ where: { userId: req.user.id } });
       await prisma.profileImage.createMany({
         data: imageUrls.map((url, idx) => ({
@@ -68,8 +62,6 @@ imageRoutes.post('/upload-profile-images',
     }
   }
 );
-
-// Delete profile images
 imageRoutes.delete('/profile-images', 
   authenticateToken,
   async (req, res) => {

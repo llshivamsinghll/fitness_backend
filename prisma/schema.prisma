@@ -16,6 +16,7 @@ model User {
   profile          Profile?
   images           ProfileImage[]
   plans            Plan[]
+  planDailyProgresses PlanDailyProgress[] @relation("PlanDailyProgresses")
   workoutLogs      WorkoutLog[]        @relation("WorkoutLogs")
   bodyMeasurements BodyMeasurement[]   @relation("BodyMeasurements")
   achievements     Achievement[]       @relation("Achievements")
@@ -39,6 +40,7 @@ model Profile {
   medicalConditions String?  // Optional text field for health conditions
   planDuration      Int?     // Desired plan duration in weeks
   location          String?  // User's location/region (country, city, or region)
+  state             String?  // User's state/region within a country (e.g., Maharashtra)
   cuisine           String?  // Preferred cuisine style (e.g., "Indian", "Mediterranean", "Asian")
 
   user              User     @relation(fields: [userId], references: [id])
@@ -63,7 +65,27 @@ model Plan {
   version    Int      @default(1)
 
   user       User     @relation(fields: [userId], references: [id])
+  dailyProgress PlanDailyProgress[] @relation("PlanToDailyProgress")
   createdAt  DateTime @default(now())
+}
+
+model PlanDailyProgress {
+  id                 Int      @id @default(autoincrement())
+  userId             Int
+  planId             Int
+  planDay            Int
+  completedExercises Json?
+  completedMeals     Json?
+  currentSet         Json?
+  workoutTimer       Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], name: "PlanDailyProgresses")
+  plan Plan @relation(fields: [planId], references: [id], name: "PlanToDailyProgress")
+
+  @@unique([userId, planId, planDay])
+  @@index([userId, planId])
 }
 
 model WorkoutLog {

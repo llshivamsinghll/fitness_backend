@@ -1,17 +1,17 @@
-﻿import Groq from 'groq-sdk';
+import Groq from 'groq-sdk';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-const makeAICall = async (messages, temperature = 0.7) => {
+const makeAICall = async (messages, temperature = 0.7, maxTokens = 2048) => {
   try {
     console.log('Making AI call with model: llama-3.1-8b-instant');
     const completion = await groq.chat.completions.create({
       messages,
       model: "llama-3.1-8b-instant",
       temperature,
-      max_tokens: 2048,
+      max_tokens: maxTokens,
     });
     
     const content = completion.choices[0]?.message?.content;
@@ -26,8 +26,6 @@ const makeAICall = async (messages, temperature = 0.7) => {
 
 export const getWorkoutRecommendations = async (userProfile) => {
   const { age, weight, height, gender, fitnessGoal, activityLevel, workoutPreference, injuries = [], duration, name, medicalConditions } = userProfile;
-  
-  // Ensure duration is from profile, no defaults
   if (!duration) {
     console.warn('No duration provided in user profile, this should not happen');
   }
@@ -82,19 +80,13 @@ Return ONLY this JSON structure:
     if (!response) {
       throw new Error('No response from AI');
     }
-    
-    // Multiple parsing attempts
     let parsed = null;
-    
-    // Attempt 1: Direct JSON parse
     try {
       parsed = JSON.parse(response);
       console.log('Direct JSON parse successful');
     } catch (e) {
       console.log('Direct JSON parse failed:', e.message);
     }
-    
-    // Attempt 2: Remove markdown and parse
     if (!parsed) {
       try {
         let cleanResponse = response.replace(/```json|```/g, '').trim();
@@ -104,8 +96,6 @@ Return ONLY this JSON structure:
         console.log('Markdown removal parse failed:', e.message);
       }
     }
-    
-    // Attempt 3: Extract JSON object
     if (!parsed) {
       try {
         const firstBrace = response.indexOf('{');
@@ -131,11 +121,9 @@ Return ONLY this JSON structure:
       };
     } else {
       console.log('Parsed data missing phases, creating structured fallback');
-      // Create structured workout plan with multiple phases based on duration
       const phases = [];
       
       if (duration <= 4) {
-        // Short plan: Single phase
         phases.push({
           name: "Foundation Phase",
           weeks: `1-${duration}`,
@@ -170,10 +158,7 @@ Return ONLY this JSON structure:
           ]
         });
       } else {
-        // Longer plan: Multiple phases
         const midPoint = Math.ceil(duration / 2);
-        
-        // Phase 1: Foundation
         phases.push({
           name: "Foundation Phase",
           weeks: `1-${midPoint}`,
@@ -207,8 +192,6 @@ Return ONLY this JSON structure:
             }
           ]
         });
-
-        // Phase 2: Progression
         phases.push({
           name: "Progression Phase", 
           weeks: `${midPoint + 1}-${duration}`,
@@ -303,15 +286,257 @@ Return ONLY this JSON structure:
   }
 };
 
-export const getMealPlanRecommendations = async (userProfile) => {
-  const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, name, medicalConditions, duration, location, cuisine } = userProfile;
+const toNumber = (value, fallback = 0) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
 
-  console.log('[AI] Meal Plan Generation - User Profile:', { 
-    location, 
-    cuisine, 
+const normalizeMeal = (meal = {}) => {
+  const foods = Array.isArray(meal.foods) ? meal.foods : [];
+  const foodsCalories = foods.reduce((sum, item) => sum + toNumber(item?.calories, 0), 0);
+  const calories = toNumber(meal.calories, toNumber(meal.total_calories, foodsCalories));
+
+  return {
+    meal_type: meal.meal_type || 'Meal',
+    name: meal.name || 'Unnamed meal',
+    calories,
+    total_calories: toNumber(meal.total_calories, calories),
+    protein: toNumber(meal.protein, 0),
+    carbs: toNumber(meal.carbs, 0),
+    fat: toNumber(meal.fat, 0),
+    prep_time: meal.prep_time || '',
+    foods,
+    recipe_notes: meal.recipe_notes || ''
+  };
+};
+
+const normalizeWeeklyPlan = (rawWeeklyPlan) => {
+  if (!Array.isArray(rawWeeklyPlan)) return [];
+
+  return rawWeeklyPlan.map((day, index) => {
+    const meals = Array.isArray(day?.meals) ? day.meals.map(normalizeMeal) : [];
+    return {
+      day: toNumber(day?.day, index + 1),
+      meals
+    };
+  });
+};
+
+const normalizeDietPayload = (parsed, dailyCalories) => {
+  const source = parsed && typeof parsed === 'object' ? parsed : {};
+
+  const weeklyFromWeeklyPlan = normalizeWeeklyPlan(source.weekly_plan);
+  const weeklyFromDays = weeklyFromWeeklyPlan.length === 0 ? normalizeWeeklyPlan(source.days) : [];
+  const directMeals = Array.isArray(source.meals) ? source.meals.map(normalizeMeal) : [];
+
+  const weekly_plan = weeklyFromWeeklyPlan.length > 0
+    ? weeklyFromWeeklyPlan
+    : weeklyFromDays.length > 0
+      ? weeklyFromDays
+      : directMeals.length > 0
+        ? [{ day: 1, meals: directMeals }]
+        : [];
+
+  const meals = weekly_plan.flatMap((day) => day.meals);
+
+  const mergedTips = [
+    ...(Array.isArray(source.tips) ? source.tips : []),
+    ...(Array.isArray(source.regional_tips) ? source.regional_tips : []),
+    ...(Array.isArray(source.meal_prep_tips) ? source.meal_prep_tips : [])
+  ];
+
+  return {
+    schemaVersion: 2,
+    region: source.region || null,
+    daily_targets: {
+      calories: toNumber(source.daily_targets?.calories, dailyCalories),
+      protein: toNumber(source.daily_targets?.protein, 0),
+      carbs: toNumber(source.daily_targets?.carbs, 0),
+      fat: toNumber(source.daily_targets?.fat, 0),
+      fiber: toNumber(source.daily_targets?.fiber, 0)
+    },
+    weekly_plan,
+    meals,
+    tips: [...new Set(mergedTips.filter(Boolean))],
+    shopping_list: Array.isArray(source.shopping_list) ? source.shopping_list : []
+  };
+};
+
+const buildRegionalFallbackDiet = (regionalContext, dailyCalories, dietPreference, location, state) => {
+  const region = (regionalContext || location || 'International').toLowerCase();
+  const stateName = (state || '').toLowerCase();
+
+  const regionMeals = {
+    india: [
+      { meal_type: 'Breakfast', name: 'Idli with Sambar', protein: 14, carbs: 52, fat: 8 },
+      { meal_type: 'Lunch', name: 'Dal, Rice, and Seasonal Sabzi', protein: 26, carbs: 78, fat: 14 },
+      { meal_type: 'Snack', name: 'Roasted Chana and Buttermilk', protein: 14, carbs: 22, fat: 5 },
+      { meal_type: 'Dinner', name: 'Chapati with Paneer Bhurji', protein: 34, carbs: 48, fat: 20 }
+    ],
+    italy: [
+      { meal_type: 'Breakfast', name: 'Wholegrain Toast with Ricotta and Fruit', protein: 16, carbs: 45, fat: 11 },
+      { meal_type: 'Lunch', name: 'Chicken Risotto with Vegetables', protein: 34, carbs: 70, fat: 16 },
+      { meal_type: 'Snack', name: 'Greek Yogurt with Nuts', protein: 17, carbs: 18, fat: 10 },
+      { meal_type: 'Dinner', name: 'Grilled Fish with Minestrone', protein: 36, carbs: 36, fat: 16 }
+    ],
+    japan: [
+      { meal_type: 'Breakfast', name: 'Miso Soup, Rice, and Grilled Fish', protein: 24, carbs: 48, fat: 12 },
+      { meal_type: 'Lunch', name: 'Chicken Teriyaki Bowl', protein: 34, carbs: 64, fat: 14 },
+      { meal_type: 'Snack', name: 'Edamame and Fruit', protein: 13, carbs: 24, fat: 4 },
+      { meal_type: 'Dinner', name: 'Tofu Stir-fry with Soba', protein: 30, carbs: 50, fat: 14 }
+    ],
+    international: [
+      { meal_type: 'Breakfast', name: 'Oats with Milk and Fruit', protein: 18, carbs: 50, fat: 10 },
+      { meal_type: 'Lunch', name: 'Grilled Chicken with Rice and Veggies', protein: 36, carbs: 68, fat: 14 },
+      { meal_type: 'Snack', name: 'Yogurt and Nuts', protein: 15, carbs: 20, fat: 9 },
+      { meal_type: 'Dinner', name: 'Salmon with Quinoa and Salad', protein: 34, carbs: 42, fat: 18 }
+    ]
+  };
+
+  const indianStateMeals = {
+    maharashtra: [
+      { meal_type: 'Breakfast', name: 'Poha with Peanuts', protein: 12, carbs: 58, fat: 10 },
+      { meal_type: 'Lunch', name: 'Varan Bhaat with Bhindi Sabzi', protein: 22, carbs: 82, fat: 14 },
+      { meal_type: 'Snack', name: 'Sprouts Chaat', protein: 14, carbs: 28, fat: 6 },
+      { meal_type: 'Dinner', name: 'Jowar Bhakri with Pithla', protein: 26, carbs: 56, fat: 16 }
+    ],
+    tamilnadu: [
+      { meal_type: 'Breakfast', name: 'Idli with Sambar', protein: 14, carbs: 52, fat: 8 },
+      { meal_type: 'Lunch', name: 'Sambar Rice with Poriyal', protein: 20, carbs: 86, fat: 14 },
+      { meal_type: 'Snack', name: 'Sundal', protein: 12, carbs: 24, fat: 5 },
+      { meal_type: 'Dinner', name: 'Dosa with Tomato Chutney', protein: 18, carbs: 60, fat: 12 }
+    ],
+    gujarat: [
+      { meal_type: 'Breakfast', name: 'Thepla with Curd', protein: 12, carbs: 54, fat: 11 },
+      { meal_type: 'Lunch', name: 'Gujarati Dal with Rice and Shaak', protein: 20, carbs: 80, fat: 14 },
+      { meal_type: 'Snack', name: 'Dhokla', protein: 10, carbs: 30, fat: 4 },
+      { meal_type: 'Dinner', name: 'Bajra Rotla with Ringan Bharta', protein: 24, carbs: 52, fat: 14 }
+    ],
+    punjab: [
+      { meal_type: 'Breakfast', name: 'Besan Chilla with Curd', protein: 18, carbs: 36, fat: 10 },
+      { meal_type: 'Lunch', name: 'Rajma Chawal with Salad', protein: 24, carbs: 86, fat: 14 },
+      { meal_type: 'Snack', name: 'Roasted Makhana', protein: 8, carbs: 20, fat: 4 },
+      { meal_type: 'Dinner', name: 'Roti with Palak Paneer', protein: 30, carbs: 46, fat: 20 }
+    ],
+    bengal: [
+      { meal_type: 'Breakfast', name: 'Chirer Pulao', protein: 10, carbs: 52, fat: 9 },
+      { meal_type: 'Lunch', name: 'Masoor Dal with Rice and Aloo Bhaja', protein: 18, carbs: 84, fat: 14 },
+      { meal_type: 'Snack', name: 'Ghugni', protein: 11, carbs: 32, fat: 5 },
+      { meal_type: 'Dinner', name: 'Luchi with Cholar Dal', protein: 18, carbs: 58, fat: 18 }
+    ]
+  };
+
+  const stateSpecificIndiaMeals = Object.entries(indianStateMeals).find(([key]) => stateName.includes(key))?.[1];
+
+  const selectedMeals = region.includes('india')
+    ? stateSpecificIndiaMeals || regionMeals.india
+    : region.includes('italy')
+      ? regionMeals.italy
+      : region.includes('japan')
+        ? regionMeals.japan
+        : regionMeals.international;
+
+  const caloriesPerMeal = Math.max(300, Math.round(dailyCalories / selectedMeals.length));
+
+  const meals = selectedMeals.map((meal) => ({
+    ...meal,
+    calories: caloriesPerMeal,
+    total_calories: caloriesPerMeal,
+    prep_time: '20-30 minutes',
+    foods: [],
+    recipe_notes: `Use ingredients commonly available in ${state || regionalContext || 'your area'}.`
+  }));
+
+  const adjustedMeals = (dietPreference === 'vegetarian' || dietPreference === 'vegan')
+    ? meals.map((meal) => ({
+        ...meal,
+        name: meal.name
+          .replace('Chicken', 'Tofu')
+          .replace('Fish', 'Paneer')
+          .replace('Salmon', 'Soy Paneer')
+      }))
+    : meals;
+
+  return {
+    schemaVersion: 2,
+    region: regionalContext || location || 'International',
+    daily_targets: {
+      calories: dailyCalories,
+      protein: 120,
+      carbs: 220,
+      fat: 70,
+      fiber: 25
+    },
+    weekly_plan: [{ day: 1, meals: adjustedMeals }],
+    meals: adjustedMeals,
+    tips: [
+      `Prioritize locally available foods in ${state || regionalContext || 'your area'}.`,
+      'Adjust portions to match your daily calorie target.',
+      'Keep hydration and meal timing consistent.'
+    ],
+    shopping_list: []
+  };
+};
+
+const tryParseMealResponse = (rawResponse) => {
+  if (!rawResponse || typeof rawResponse !== 'string') return null;
+
+  const attempts = [];
+  attempts.push(rawResponse.trim());
+  attempts.push(rawResponse.replace(/```json|```/g, '').trim());
+
+  const withoutFences = rawResponse.replace(/```json|```/g, '').trim();
+  const firstBrace = withoutFences.indexOf('{');
+  if (firstBrace !== -1) {
+    let inString = false;
+    let escaped = false;
+    let depth = 0;
+    for (let i = firstBrace; i < withoutFences.length; i++) {
+      const ch = withoutFences[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (ch === '{') depth++;
+        if (ch === '}') depth--;
+        if (depth === 0) {
+          attempts.push(withoutFences.substring(firstBrace, i + 1));
+          break;
+        }
+      }
+    }
+  }
+
+  for (const candidate of attempts) {
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+    }
+  }
+
+  return null;
+};
+
+export const getMealPlanRecommendations = async (userProfile) => {
+  const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, name, medicalConditions, duration, location, state, cuisine } = userProfile;
+
+  console.log('[AI] Meal Plan Generation - User Profile:', {
+    location,
+    state,
+    cuisine,
     dietPreference,
     name,
-    fitnessGoal 
+    fitnessGoal
   });
 
   const bmr = gender === 'male' 
@@ -319,23 +544,23 @@ export const getMealPlanRecommendations = async (userProfile) => {
     : 447.593 + (9.247 * weight) + (3.098 * height) - (4.330 * age);
   
   const dailyCalories = Math.round(bmr * 1.55);
-
-  // Determine regional cuisine preferences
-  const regionalContext = location || cuisine || 'International';
+  const regionalContext = state && location
+    ? `${state}, ${location}`
+    : location || cuisine || 'International';
   console.log('[AI] Regional Context for Meal Plan:', regionalContext);
   const cuisineGuidance = `
-🌍 CRITICAL REQUIREMENT - REGIONAL CUISINE:
+?? CRITICAL REQUIREMENT - REGIONAL CUISINE:
 You MUST create ALL meals exclusively from ${regionalContext} cuisine.
 
 MANDATORY REGIONAL REQUIREMENTS:
-✓ Use ONLY traditional ${regionalContext} dishes and recipes
-✓ Use ONLY ingredients commonly available in ${regionalContext} local markets
-✓ Follow ${regionalContext} cooking methods and techniques
-✓ Include ${regionalContext} traditional spices, herbs, and seasonings
-✓ Follow ${regionalContext} cultural meal patterns and timing
-✓ Name dishes in local ${regionalContext} language when appropriate
-${dietPreference === 'vegetarian' || dietPreference === 'vegan' ? `✓ STRICTLY follow ${dietPreference} dietary restrictions` : ''}
-${dietPreference === 'non-vegetarian' ? `✓ Include ${regionalContext} traditional meat, fish, and poultry dishes` : ''}
+? Use ONLY traditional ${regionalContext} dishes and recipes
+? Use ONLY ingredients commonly available in ${regionalContext} local markets
+? Follow ${regionalContext} cooking methods and techniques
+? Include ${regionalContext} traditional spices, herbs, and seasonings
+? Follow ${regionalContext} cultural meal patterns and timing
+? Name dishes in local ${regionalContext} language when appropriate
+${dietPreference === 'vegetarian' || dietPreference === 'vegan' ? `? STRICTLY follow ${dietPreference} dietary restrictions` : ''}
+${dietPreference === 'non-vegetarian' ? `? Include ${regionalContext} traditional meat, fish, and poultry dishes` : ''}
 
 Example: If region is "India", use dishes like Dosa, Idli, Dal, Roti, Paneer, etc.
 Example: If region is "Italy", use dishes like Pasta, Risotto, Bruschetta, etc.
@@ -359,6 +584,7 @@ USER PROFILE:
 - Activity Level: ${activityLevel}
 - Diet Preference: ${dietPreference || 'none'}
 - Region/Location: ${regionalContext}
+- State/Region: ${state || 'Not specified'}
 - Medical Conditions: ${medicalConditions || 'None'}
 - Plan Duration: ${duration} weeks
 - Target Daily Calories: ${dailyCalories}
@@ -411,36 +637,43 @@ Return ONLY this JSON structure:
   ];
 
   try {
-    const response = await makeAICall(messages, 0.2);
-    console.log('Raw AI Meal Response:', response?.substring(0, 500) + '...');
-    
-    // Try to extract JSON from response
-    let cleanResponse = response.replace(/```json|```/g, '').trim();
-    
-    // Find first { and last } to extract JSON object
-    const firstBrace = cleanResponse.indexOf('{');
-    const lastBrace = cleanResponse.lastIndexOf('}');
-    
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      cleanResponse = cleanResponse.substring(firstBrace, lastBrace + 1);
+    const response = await makeAICall(messages, 0.2, 4096);
+    const rawResponse = typeof response === 'string' ? response : '';
+    console.log('Raw AI Meal Response:', rawResponse.substring(0, 500) + '...');
+
+    let parsed = tryParseMealResponse(rawResponse);
+
+    if (!parsed) {
+      console.warn('[AI] Meal response parse failed. Attempting JSON repair pass.');
+      const repairMessages = [
+        {
+          role: 'system',
+          content: 'Convert the provided text into valid JSON only. Return only JSON with keys: region, daily_targets, weekly_plan, regional_tips, shopping_list, meal_prep_tips.'
+        },
+        {
+          role: 'user',
+          content: `Repair this into valid JSON, preserving as much data as possible:\n\n${rawResponse}`
+        }
+      ];
+
+      const repaired = await makeAICall(repairMessages, 0.1, 2048);
+      parsed = tryParseMealResponse(typeof repaired === 'string' ? repaired : '');
     }
-    
-    const parsed = JSON.parse(cleanResponse);
-    
-    return {
-      daily_targets: parsed.daily_targets || { calories: dailyCalories },
-      meals: parsed.meals || [],
-      tips: parsed.tips || [],
-      shopping_list: parsed.shopping_list || [],
-    };
+
+    if (!parsed) {
+      throw new Error('Meal response could not be parsed as valid JSON');
+    }
+
+    const normalizedDiet = normalizeDietPayload(parsed, dailyCalories);
+    if (normalizedDiet.meals.length === 0) {
+      console.warn('[AI] Parsed meal payload has no meals. Using regional fallback meal plan.');
+      return buildRegionalFallbackDiet(regionalContext, dailyCalories, dietPreference, location, state);
+    }
+
+    return normalizedDiet;
   } catch (error) {
     console.error('Meal plan generation error:', error);
-    return {
-      daily_targets: { calories: dailyCalories },
-      meals: [],
-      tips: ['Eat balanced meals'],
-      shopping_list: [],
-    };
+    return buildRegionalFallbackDiet(regionalContext, dailyCalories, dietPreference, location, state);
   }
 };
 
