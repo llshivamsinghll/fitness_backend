@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+// Create a workout log entry and trigger PR/achievement recalculations.
 export const logWorkout = async (req, res) => {
   try {
     const { exerciseName, sets, reps, weight, duration, notes, difficulty } = req.body;
@@ -37,6 +39,8 @@ export const logWorkout = async (req, res) => {
     });
   }
 };
+
+// Fetch workout history with optional date and exercise filters.
 export const getWorkoutHistory = async (req, res) => {
   try {
     const { startDate, endDate, exerciseName, limit = 50 } = req.query;
@@ -64,6 +68,8 @@ export const getWorkoutHistory = async (req, res) => {
     res.status(500).json({ error: 'Failed to get workout history' });
   }
 };
+
+// Compute period-based workout stats and chart-ready daily counts.
 export const getWorkoutStats = async (req, res) => {
   try {
     const { period = '30' } = req.query;
@@ -80,7 +86,7 @@ export const getWorkoutStats = async (req, res) => {
     const uniqueExercises = new Set(logs.map(log => log.exerciseName)).size;
     const totalSets = logs.reduce((sum, log) => sum + log.sets, 0);
     const totalReps = logs.reduce((sum, log) => sum + log.reps * log.sets, 0);
-    // Volume is used as a single intensity proxy for trend cards/charts.
+    // Total volume acts as a simple intensity indicator for dashboard trends.
     const totalVolume = logs.reduce((sum, log) => sum + (log.weight || 0) * log.reps * log.sets, 0);
     const workoutsByDate = {};
     logs.forEach(log => {
@@ -110,6 +116,8 @@ export const getWorkoutStats = async (req, res) => {
     res.status(500).json({ error: 'Failed to get workout statistics' });
   }
 };
+
+// Save a body-measurement snapshot for longitudinal tracking.
 export const logBodyMeasurement = async (req, res) => {
   try {
     const { weight, bodyFat, muscleMass, chest, waist, hips, biceps, thighs, notes } = req.body;
@@ -142,6 +150,8 @@ export const logBodyMeasurement = async (req, res) => {
     });
   }
 };
+
+// Return measurement history plus deltas between oldest and latest entries.
 export const getBodyMeasurements = async (req, res) => {
   try {
     const { startDate, endDate, limit = 50 } = req.query;
@@ -180,6 +190,8 @@ export const getBodyMeasurements = async (req, res) => {
     res.status(500).json({ error: 'Failed to get body measurements' });
   }
 };
+
+// List all unlocked achievements for the current user.
 export const getAchievements = async (req, res) => {
   try {
     const achievements = await prisma.achievement.findMany({
@@ -197,6 +209,8 @@ export const getAchievements = async (req, res) => {
     res.status(500).json({ error: 'Failed to get achievements' });
   }
 };
+
+// List personal records, optionally narrowed to one exercise.
 export const getPersonalRecords = async (req, res) => {
   try {
     const { exerciseName } = req.query;
@@ -221,6 +235,8 @@ export const getPersonalRecords = async (req, res) => {
     res.status(500).json({ error: 'Failed to get personal records' });
   }
 };
+
+// Build a dashboard summary with recent counts and latest key metrics.
 export const getProgressSummary = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -257,6 +273,8 @@ export const getProgressSummary = async (req, res) => {
     res.status(500).json({ error: 'Failed to get progress summary' });
   }
 };
+
+// Save day-level plan progress used by autosave and resume flows.
 export const savePlanDayProgress = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -297,9 +315,10 @@ export const savePlanDayProgress = async (req, res) => {
       ? completedMeals.map((index) => Number(index)).filter((index) => Number.isInteger(index) && index >= 0)
       : [];
 
+    // Guard against malformed payloads by accepting object shape only.
     const safeCurrentSet = currentSet && typeof currentSet === 'object' ? currentSet : {};
 
-    // Upsert keeps this endpoint idempotent for repeated autosave calls from the dashboard.
+    // Upsert keeps repeated autosave requests idempotent for the same user/plan/day key.
     const progress = await prisma.planDailyProgress.upsert({
       where: {
         userId_planId_planDay: {
@@ -335,6 +354,8 @@ export const savePlanDayProgress = async (req, res) => {
     res.status(500).json({ error: 'Failed to save plan day progress' });
   }
 };
+
+// Load previously saved day-level plan progress for the requested plan day.
 export const getPlanDayProgress = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -369,6 +390,8 @@ export const getPlanDayProgress = async (req, res) => {
     res.status(500).json({ error: 'Failed to get plan day progress' });
   }
 };
+
+// Compute current workout streak from unique workout calendar days.
 async function calculateStreak(userId) {
   const logs = await prisma.workoutLog.findMany({
     where: { userId },
@@ -396,7 +419,7 @@ async function calculateStreak(userId) {
     return 0;
   }
 
-  // Streak remains active if the user worked out today or yesterday.
+  // A streak is considered active only when today's or yesterday's workout exists.
   let checkDate = workoutDates.has(today) ? today : yesterday;
   while (workoutDates.has(checkDate)) {
     streak++;
@@ -405,6 +428,8 @@ async function calculateStreak(userId) {
 
   return streak;
 }
+
+// Update PR entries for max weight and total volume after a workout is logged.
 async function checkPersonalRecords(userId, exerciseName, weight, reps, sets) {
   if (!weight || weight <= 0) return;
 
@@ -478,6 +503,8 @@ async function checkPersonalRecords(userId, exerciseName, weight, reps, sets) {
     console.error('[ERROR] Check personal records error:', error);
   }
 }
+
+// Unlock achievement milestones for streak days and total workout count.
 async function checkAchievements(userId) {
   try {
     const streak = await calculateStreak(userId);

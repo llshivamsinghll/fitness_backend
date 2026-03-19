@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+// Enforce authenticated access by verifying JWT and resolving the active user.
 export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -25,6 +26,8 @@ export const authenticateToken = async (req, res, next) => {
         message: 'Please login to access this resource'
       });
     }
+
+    // Verify token signature/expiry before querying database.
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     if (!decoded || !decoded.userId) {
@@ -85,6 +88,7 @@ export const authenticateToken = async (req, res, next) => {
   }
 };
 
+// Optionally attaches user context when token exists; never blocks anonymous requests.
 export const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];

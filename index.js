@@ -20,7 +20,7 @@ console.log('Port:', envInfo.port);
 console.log('Frontend URL:', envInfo.frontendUrl);
 
 if (!envValidation.isValid) {
-  // Fail fast at boot so the app never starts with broken required configuration.
+  // Stop startup when required environment variables are invalid.
   console.error('Environment validation failed:');
   envValidation.errors.forEach(error => console.error(`  - ${error}`));
   process.exit(1);
@@ -30,7 +30,7 @@ if (envValidation.warnings.length > 0) {
   console.warn('Environment warnings:');
   envValidation.warnings.forEach(warning => console.warn(`  - ${warning}`));
 }
-// Keep a small explicit allowlist for local dev and append deployed frontend when configured.
+// Build the explicit CORS allowlist from local dev origins plus configured frontend URL.
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:8080',
@@ -43,7 +43,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Local tools (Postman/curl) often omit Origin; allow them only outside production.
+    // Allow requests with no Origin in development (curl/Postman/local scripts).
     if (!origin && !isProduction) {
       return callback(null, true);
     }
@@ -58,7 +58,7 @@ app.use(cors({
         'railway.app'
       ];
 
-      // Allow known deployment domains even when preview URLs vary.
+      // Permit trusted hosting domains to support preview URLs and platform subdomains.
       const isTrusted = trustedDomains.some(domain => origin.includes(domain));
       if (isTrusted) {
         return callback(null, true);
@@ -77,7 +77,7 @@ app.use(cors({
   maxAge: 86400
 }));
 app.use((req, res, next) => {
-  // Baseline security headers for all API responses.
+  // Apply baseline security headers to every response.
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -87,7 +87,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use((req, res, next) => {
-  // Keep production logs compact while preserving richer diagnostics in development.
+  // Log request essentials for all environments and add deeper diagnostics in development.
   const timestamp = new Date().toISOString();
   const origin = req.headers.origin || 'no-origin';
   const userAgent = req.headers['user-agent'] || 'unknown';
@@ -103,6 +103,7 @@ app.use((req, res, next) => {
   next();
 });
 if (process.env.NODE_ENV === 'production') {
+  // Apply global API throttling only in production environments.
   app.use('/api/', apiLimiter);
   console.log('[INFO] Rate limiting enabled for production');
 }
@@ -110,6 +111,8 @@ app.use('/api/user', user);
 app.use('/api/images', imageRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/progress', progressRoutes);
+
+// Simple health endpoint for uptime checks.
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
     message: 'Server is running', 
@@ -137,7 +140,7 @@ app.use((err, req, res, next) => {
   }
   const statusCode = err.status || err.statusCode || 500;
 
-  // Keep client responses generic in production while preserving debug detail in development.
+  // Return safe generic errors in production and richer diagnostics in development.
   res.status(statusCode).json({
     error: isProduction ? 'An error occurred' : err.message,
     message: err.message || 'Internal server error',
@@ -151,6 +154,8 @@ const server = app.listen(PORT, () => {
   console.log(`Started at: ${new Date().toISOString()}`);
   console.log('='.repeat(50));
 });
+
+// Graceful shutdown for orchestrator stop signals.
 process.on('SIGTERM', () => {
   console.log('[INFO] SIGTERM received, shutting down gracefully...');
   server.close(() => {
@@ -159,6 +164,7 @@ process.on('SIGTERM', () => {
   });
 });
 
+// Graceful shutdown for local interruption (Ctrl+C).
 process.on('SIGINT', () => {
   console.log('[INFO] SIGINT received, shutting down gracefully...');
   server.close(() => {
@@ -166,11 +172,14 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+
+// Crash fast on unhandled runtime failures to avoid unknown server state.
 process.on('uncaughtException', (error) => {
   console.error('[FATAL] Uncaught Exception:', error);
   process.exit(1);
 });
 
+// Crash fast on unhandled promise rejections for the same reason.
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);

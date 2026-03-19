@@ -2,13 +2,16 @@ import aiService from '../utils/aiService.js';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+// Generate workout guidance using persisted profile values with request-body fallback.
 export const getWorkoutRecommendations = async (req, res) => {
   try {
     const { age, weight, height, fitnessGoal, activityLevel, workoutPreference, injuries } = req.body;
     const dbProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
-    // Prefer stored profile data and only fall back to request payload values when missing.
+
+    // Prefer database profile fields so repeated requests produce consistent personalization.
     const userProfile = {
       age: parseInt(dbProfile?.age || age),
       weight: parseFloat(dbProfile?.weight || weight),
@@ -37,6 +40,8 @@ export const getWorkoutRecommendations = async (req, res) => {
     });
   }
 };
+
+// Generate meal plan guidance with the same profile merge strategy as workouts.
 export const getMealPlanRecommendations = async (req, res) => {
   try {
     const { 
@@ -51,7 +56,8 @@ export const getMealPlanRecommendations = async (req, res) => {
     const dbProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
-    // Keep meal generation stable by prioritizing persisted profile fields over ad-hoc request values.
+
+    // Persisted profile data takes precedence to avoid drift from partial request payloads.
     const userProfile = {
       age: parseInt(dbProfile?.age || age),
       weight: parseFloat(dbProfile?.weight || weight),
@@ -83,6 +89,8 @@ export const getMealPlanRecommendations = async (req, res) => {
     });
   }
 };
+
+// Return AI coach advice after validating prompt presence and length limits.
 export const getFitnessCoachAdvice = async (req, res) => {
   try {
     const { question, userContext } = req.body;
@@ -118,6 +126,8 @@ export const getFitnessCoachAdvice = async (req, res) => {
     });
   }
 };
+
+// Ask AI to analyze progress input; reject empty metric payloads.
 export const analyzeProgress = async (req, res) => {
   try {
     const { workoutHistory, weightHistory, goalProgress, timeframe } = req.body;
@@ -151,6 +161,8 @@ export const analyzeProgress = async (req, res) => {
     });
   }
 };
+
+// Return form-analysis guidance for a specific exercise and optional feedback context.
 export const analyzeExerciseForm = async (req, res) => {
   try {
     const { exerciseName, userFeedback } = req.body;
@@ -184,12 +196,14 @@ export const analyzeExerciseForm = async (req, res) => {
     });
   }
 };
+
+// Build a short tips prompt constrained to supported categories.
 export const getQuickTips = async (req, res) => {
   try {
     const { category, userLevel } = req.query;
     
     const validCategories = ['workout', 'nutrition', 'recovery', 'motivation', 'general'];
-    // Clamp category to a known set so prompt generation cannot drift into unsupported buckets.
+    // Clamp unknown categories to a safe default before generating the AI prompt.
     const selectedCategory = validCategories.includes(category) ? category : 'general';
     
     let question = `Give me 3 quick ${selectedCategory} tips`;
@@ -217,6 +231,8 @@ export const getQuickTips = async (req, res) => {
     });
   }
 };
+
+// Generate alternative exercises based on reason and available equipment.
 export const getExerciseAlternatives = async (req, res) => {
   try {
     const { exerciseName, reason, equipment } = req.body;
@@ -258,6 +274,8 @@ export const getExerciseAlternatives = async (req, res) => {
     });
   }
 };
+
+// Generate workout and meal plans together, then save a versioned snapshot.
 export const generateAndSavePlan = async (req, res) => {
   try {
     const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, planDuration, name, location, state, cuisine } = req.body;
@@ -292,7 +310,7 @@ export const generateAndSavePlan = async (req, res) => {
       aiService.getMealPlanRecommendations(completeProfile)
     ]);
 
-    // Normalize AI output before persisting so plan payload shape stays consistent across versions.
+    // Normalize diet fields before persistence so downstream consumers read a stable schema.
     const safeDiet = {
       schemaVersion: Number(diet?.schemaVersion) || 2,
       region: diet?.region || null,
@@ -312,7 +330,8 @@ export const generateAndSavePlan = async (req, res) => {
       where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' }
     });
-    // Increment version per user so history remains ordered and reversible.
+
+    // Increment version per user to preserve historical ordering of generated plans.
     const nextVersion = (lastPlan?.version || 0) + 1;
 
     const saved = await prisma.plan.create({
@@ -338,6 +357,8 @@ export const generateAndSavePlan = async (req, res) => {
     });
   }
 };
+
+// Return the latest saved plan for the authenticated user.
 export const getLatestPlan = async (req, res) => {
   try {
     const plan = await prisma.plan.findFirst({

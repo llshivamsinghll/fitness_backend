@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const imageRoutes = express.Router();
+// Uploads up to three profile photos and replaces any previously stored set.
 imageRoutes.post('/upload-profile-images', 
   authenticateToken,
   upload.array('images', 3),
@@ -18,6 +19,7 @@ imageRoutes.post('/upload-profile-images',
         });
       }
       const imageUrls = req.files.map(file => file.path);
+      // Keep one canonical image set by deleting old records before inserting new ones.
       await prisma.profileImage.deleteMany({ where: { userId: req.user.id } });
       await prisma.profileImage.createMany({
         data: imageUrls.map((url, idx) => ({
@@ -32,6 +34,7 @@ imageRoutes.post('/upload-profile-images',
         include: { profile: true, images: true }
       });
 
+      // Return refreshed user payload so clients can update state without an extra fetch.
       res.json({
         success: true,
         message: 'Profile images uploaded successfully',
@@ -62,6 +65,7 @@ imageRoutes.post('/upload-profile-images',
     }
   }
 );
+// Deletes all stored profile photos for the authenticated user.
 imageRoutes.delete('/profile-images', 
   authenticateToken,
   async (req, res) => {

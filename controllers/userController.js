@@ -3,7 +3,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
 const prisma = new PrismaClient();
-// Keep API responses backward-compatible by flattening selected profile fields.
+
+// Shape Prisma user/profile records into the flattened user object consumed by clients.
 function toUserResponse(u) {
   const profile = u.profile || {};
   const images = (u.images || []).map(i => i.imageUrl);
@@ -27,6 +28,7 @@ function toUserResponse(u) {
   };
 }
 
+// Register a new account, bootstrap an empty profile, and issue an auth token.
 export const signUp = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -88,6 +90,7 @@ export const signUp = async (req, res) => {
   }
 };
 
+// Authenticate credentials and return token plus normalized user payload.
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -133,6 +136,8 @@ export const login = async (req, res) => {
     });
   }
 };
+
+// Validate active token so clients can restore authenticated sessions.
 export const validateToken = async (req, res) => {
   try {
     res.json({ 
@@ -147,6 +152,8 @@ export const validateToken = async (req, res) => {
     });
   }
 };
+
+// Fetch the authenticated user's account and profile in one response payload.
 export const getProfile = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -167,6 +174,8 @@ export const getProfile = async (req, res) => {
     res.status(500).json({ error: 'Failed to get user profile' });
   }
 };
+
+// Update account name and profile fields with input validation guards.
 export const updateProfile = async (req, res) => {
   try {
     const { 
@@ -208,7 +217,7 @@ export const updateProfile = async (req, res) => {
       }
     }
 
-    // Build once so create/update paths stay aligned and easier to maintain.
+    // Reuse one profile payload so upsert create/update paths stay aligned.
     const baseProfileData = {
       height: height !== undefined ? (parseFloat(height) || null) : undefined,
       weight: weight !== undefined ? (parseFloat(weight) || null) : undefined,
@@ -259,6 +268,7 @@ export const updateProfile = async (req, res) => {
   }
 };
 
+// Stateless logout acknowledgment for client-side token disposal.
 export const logout = async (req, res) => {
   try {
     res.status(200).json({ 

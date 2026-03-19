@@ -1,5 +1,5 @@
 const rateLimit = new Map();
-// In-memory per-process limiter; simple and fast for single-instance deployments.
+// Periodically removes expired buckets to keep memory usage bounded.
 setInterval(() => {
   const now = Date.now();
   for (const [key, value] of rateLimit.entries()) {
@@ -9,6 +9,7 @@ setInterval(() => {
   }
 }, 60000);
 
+// Creates an in-memory IP-based rate limiter middleware with configurable limits.
 export const createRateLimiter = (options = {}) => {
   const {
     windowMs = 15 * 60 * 1000,
@@ -64,18 +65,22 @@ export const createRateLimiter = (options = {}) => {
     next();
   };
 };
+
+// Tight limits for authentication endpoints to reduce brute-force attempts.
 export const authLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 5,
   message: 'Too many authentication attempts, please try again later'
 });
 
+// Baseline limits for general API traffic.
 export const apiLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Too many requests from this IP, please try again later'
 });
 
+// Stricter limits for AI endpoints due to higher per-request cost.
 export const aiLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
   max: 10,
