@@ -2,7 +2,7 @@ services:
   - type: web
     name: fitness-backend
     env: node
-    buildCommand: npm install
+    buildCommand: npm install --no-audit --no-fund && npx prisma migrate deploy
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:

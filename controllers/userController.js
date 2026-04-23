@@ -128,7 +128,12 @@ export const login = async (req, res) => {
       user: toUserResponse(user)
     });
   } catch (error) {
-    console.error('[ERROR] Login error:', error);
+    console.error('[ERROR] Login error:', {
+      message: error?.message,
+      code: error?.code,
+      meta: error?.meta,
+      name: error?.name
+    });
     
     return res.status(500).json({ 
       error: "Login failed. Please try again.",
