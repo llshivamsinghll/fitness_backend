@@ -2,14 +2,14 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+
 import user from './routes/userRoute.js';
 import imageRoutes from './routes/imageRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import progressRoutes from './routes/progressRoutes.js';
 import { validateBackendEnvironment, getBackendEnvironmentInfo } from './utils/envValidation.js';
 import { apiLimiter } from './middleware/rateLimiter.js';
-dotenv.config();
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
