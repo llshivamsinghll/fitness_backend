@@ -43,8 +43,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no Origin in development (curl/Postman/local scripts).
-    if (!origin && !isProduction) {
+    // Allow server-to-server requests and health checks that do not send Origin.
+    if (!origin) {
       return callback(null, true);
     }
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -63,10 +63,6 @@ app.use(cors({
       if (isTrusted) {
         return callback(null, true);
       }
-    }
-    if (!isProduction) {
-      console.warn('CORS: Allowing origin (dev mode):', origin);
-      return callback(null, true);
     }
     console.warn('CORS: Blocked origin:', origin);
     callback(new Error('Not allowed by CORS'));
