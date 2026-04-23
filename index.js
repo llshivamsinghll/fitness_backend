@@ -116,6 +116,16 @@ app.get('/api/health', (req, res) => {
     services: ['user', 'images', 'ai', 'progress']
   });
 });
+
+// Root handlers for platform probes and basic uptime checks.
+app.get('/', (req, res) => {
+  res.status(200).json({ message: 'Fitness backend is live' });
+});
+
+app.head('/', (req, res) => {
+  res.sendStatus(200);
+});
+
 app.use((req, res, next) => {
   console.warn(`[404] ${req.method} ${req.path} not found`);
   res.status(404).json({ 
