@@ -68,21 +68,21 @@ export const createRateLimiter = (options = {}) => {
 
 // Tight limits for authentication endpoints to reduce brute-force attempts.
 export const authLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
+  windowMs: 5 * 60 * 1000,
+  max: 35,
   message: 'Too many authentication attempts, please try again later'
 });
 
 // Baseline limits for general API traffic.
 export const apiLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 400,
   message: 'Too many requests from this IP, please try again later'
 });
 
 // Stricter limits for AI endpoints due to higher per-request cost.
 export const aiLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 10,
+  max: 35,
   message: 'AI generation limit reached, please try again later'
 });
