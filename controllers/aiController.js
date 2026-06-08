@@ -1,28 +1,53 @@
 import aiService from '../utils/aiService.js';
 import { PrismaClient } from '@prisma/client';
+import { PLAN_SCHEMA_VERSION } from '../utils/planSchema.js';
 
 const prisma = new PrismaClient();
+
+function buildCompleteProfile(dbProfile, body = {}) {
+  return {
+    age: parseInt(dbProfile?.age || body.age),
+    weight: parseFloat(dbProfile?.weight || body.weight),
+    height: parseFloat(dbProfile?.height || body.height),
+    gender: dbProfile?.gender || body.gender || 'not-specified',
+    fitnessGoal: dbProfile?.fitnessGoal || body.fitnessGoal,
+    activityLevel: dbProfile?.activityLevel || body.activityLevel || 'moderate',
+    dietPreference: dbProfile?.dietPreference || body.dietPreference || 'none',
+    duration: parseInt(dbProfile?.planDuration || body.planDuration || body.duration) || 8,
+    name: dbProfile?.name || body.name || 'User',
+    workoutPreference: body.workoutPreference || 'mixed',
+    injuries: Array.isArray(body.injuries) ? body.injuries : [],
+    medicalConditions: dbProfile?.medicalConditions || body.medicalConditions || 'none',
+    location: dbProfile?.location || body.location || null,
+    state: dbProfile?.state || body.state || null,
+    cuisine: dbProfile?.cuisine || body.cuisine || null
+  };
+}
+
+function validateProfileForPlan(profile) {
+  const missing = [];
+  if (!Number.isFinite(profile.age)) missing.push('age');
+  if (!Number.isFinite(profile.weight)) missing.push('weight');
+  if (!Number.isFinite(profile.height)) missing.push('height');
+  if (!profile.fitnessGoal) missing.push('fitnessGoal');
+  if (!profile.activityLevel) missing.push('activityLevel');
+  return missing;
+}
 
 // Generate workout guidance using persisted profile values with request-body fallback.
 export const getWorkoutRecommendations = async (req, res) => {
   try {
-    const { age, weight, height, fitnessGoal, activityLevel, workoutPreference, injuries } = req.body;
     const dbProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
+    const userProfile = buildCompleteProfile(dbProfile, req.body);
+    const missing = validateProfileForPlan(userProfile);
 
-    // Prefer database profile fields so repeated requests produce consistent personalization.
-    const userProfile = {
-      age: parseInt(dbProfile?.age || age),
-      weight: parseFloat(dbProfile?.weight || weight),
-      height: parseFloat(dbProfile?.height || height),
-      gender: dbProfile?.gender || 'not-specified',
-      fitnessGoal: dbProfile?.fitnessGoal || fitnessGoal,
-      activityLevel: dbProfile?.activityLevel || activityLevel,
-      workoutPreference: dbProfile?.workoutPreference || workoutPreference || 'mixed',
-      injuries: dbProfile?.injuries || injuries || [],
-      name: dbProfile?.name || 'User'
-    };
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: `Missing required profile fields: ${missing.join(', ')}`
+      });
+    }
     
     const recommendations = await aiService.getWorkoutRecommendations(userProfile);
     
@@ -44,34 +69,17 @@ export const getWorkoutRecommendations = async (req, res) => {
 // Generate meal plan guidance with the same profile merge strategy as workouts.
 export const getMealPlanRecommendations = async (req, res) => {
   try {
-    const { 
-      age, 
-      weight, 
-      height, 
-      fitnessGoal, 
-      activityLevel, 
-      dietaryRestrictions, 
-      allergies 
-    } = req.body;
     const dbProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
+    const userProfile = buildCompleteProfile(dbProfile, req.body);
+    const missing = validateProfileForPlan(userProfile);
 
-    // Persisted profile data takes precedence to avoid drift from partial request payloads.
-    const userProfile = {
-      age: parseInt(dbProfile?.age || age),
-      weight: parseFloat(dbProfile?.weight || weight),
-      height: parseFloat(dbProfile?.height || height),
-      gender: dbProfile?.gender || 'not-specified',
-      fitnessGoal: dbProfile?.fitnessGoal || fitnessGoal,
-      activityLevel: dbProfile?.activityLevel || activityLevel,
-      dietPreference: dbProfile?.dietPreference || 'none',
-      dietaryRestrictions: dietaryRestrictions || [],
-      allergies: allergies || [],
-      name: dbProfile?.name || 'User',
-      location: dbProfile?.location || null,
-      cuisine: dbProfile?.cuisine || null
-    };
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: `Missing required profile fields: ${missing.join(', ')}`
+      });
+    }
     
     const mealPlan = await aiService.getMealPlanRecommendations(userProfile);
     
@@ -278,54 +286,23 @@ export const getExerciseAlternatives = async (req, res) => {
 // Generate workout and meal plans together, then save a versioned snapshot.
 export const generateAndSavePlan = async (req, res) => {
   try {
-    const { age, weight, height, gender, fitnessGoal, activityLevel, dietPreference, planDuration, name, location, state, cuisine } = req.body;
-
-    if (!age || !weight || !height || !fitnessGoal || !activityLevel) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: age, weight, height, fitnessGoal, activityLevel' 
-      });
-    }
     const userProfile = await prisma.profile.findUnique({
       where: { userId: req.user.id }
     });
-    const completeProfile = {
-      age: parseInt(userProfile?.age || age) || 25,
-      weight: parseFloat(userProfile?.weight || weight) || 70,
-      height: parseFloat(userProfile?.height || height) || 170,
-      gender: userProfile?.gender || gender || 'not-specified',
-      fitnessGoal: userProfile?.fitnessGoal || fitnessGoal || 'general-fitness',
-      activityLevel: userProfile?.activityLevel || activityLevel || 'moderate',
-      dietPreference: userProfile?.dietPreference || dietPreference || 'none',
-      duration: parseInt(userProfile?.planDuration || planDuration) || 8,
-      name: userProfile?.name || name || 'User',
-      workoutPreference: userProfile?.workoutPreference || 'mixed',
-      injuries: userProfile?.injuries || [],
-      medicalConditions: userProfile?.medicalConditions || 'none',
-      location: userProfile?.location || location || null,
-      state: userProfile?.state || state || null,
-      cuisine: userProfile?.cuisine || cuisine || null
-    };
+    const completeProfile = buildCompleteProfile(userProfile, req.body);
+    const missing = validateProfileForPlan(completeProfile);
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: `Missing required profile fields: ${missing.join(', ')}`
+      });
+    }
+
     const [workout, diet] = await Promise.all([
       aiService.getWorkoutRecommendations(completeProfile),
       aiService.getMealPlanRecommendations(completeProfile)
     ]);
 
-    // Normalize diet fields before persistence so downstream consumers read a stable schema.
-    const safeDiet = {
-      schemaVersion: Number(diet?.schemaVersion) || 2,
-      region: diet?.region || null,
-      daily_targets: {
-        calories: Number(diet?.daily_targets?.calories) || 0,
-        protein: Number(diet?.daily_targets?.protein) || 0,
-        carbs: Number(diet?.daily_targets?.carbs) || 0,
-        fat: Number(diet?.daily_targets?.fat) || 0,
-        fiber: Number(diet?.daily_targets?.fiber) || 0
-      },
-      weekly_plan: Array.isArray(diet?.weekly_plan) ? diet.weekly_plan : [],
-      meals: Array.isArray(diet?.meals) ? diet.meals : [],
-      tips: Array.isArray(diet?.tips) ? diet.tips : [],
-      shopping_list: Array.isArray(diet?.shopping_list) ? diet.shopping_list : []
-    };
     const lastPlan = await prisma.plan.findFirst({
       where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' }
@@ -338,9 +315,10 @@ export const generateAndSavePlan = async (req, res) => {
       data: {
         userId: req.user.id,
         workout,
-        diet: safeDiet,
+        diet,
         duration: completeProfile.duration || 8,
-        version: nextVersion
+        version: nextVersion,
+        schemaVersion: PLAN_SCHEMA_VERSION
       }
     });
 
@@ -362,10 +340,19 @@ export const generateAndSavePlan = async (req, res) => {
 export const getLatestPlan = async (req, res) => {
   try {
     const plan = await prisma.plan.findFirst({
-      where: { userId: req.user.id },
+      where: {
+        userId: req.user.id,
+        schemaVersion: PLAN_SCHEMA_VERSION
+      },
       orderBy: { createdAt: 'desc' }
     });
-    if (!plan) return res.status(404).json({ error: 'No plan found' });
+    if (!plan) {
+      return res.status(404).json({
+        error: 'No current plan found',
+        code: 'PLAN_REGENERATION_REQUIRED',
+        requiredSchemaVersion: PLAN_SCHEMA_VERSION
+      });
+    }
     res.json({ success: true, plan });
   } catch (error) {
     console.error('Error fetching latest plan:', error);

@@ -64,10 +64,13 @@ model Plan {
   diet       Json     // JSON object for structured plan
   duration   Int?     // Plan duration in weeks (4, 8, 12, etc.)
   version    Int      @default(1)
+  schemaVersion Int   @default(3)
 
   user       User     @relation(fields: [userId], references: [id])
   dailyProgress PlanDailyProgress[] @relation("PlanToDailyProgress")
   createdAt  DateTime @default(now())
+
+  @@index([userId, schemaVersion, createdAt])
 }
 
 model PlanDailyProgress {

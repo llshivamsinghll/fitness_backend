@@ -12,7 +12,7 @@ import { apiLimiter } from './middleware/rateLimiter.js';
 
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
 console.log('Starting server...');
 const envValidation = validateBackendEnvironment();
 const envInfo = getBackendEnvironmentInfo();
@@ -34,7 +34,6 @@ if (envValidation.warnings.length > 0) {
 }
 // Build the explicit CORS allowlist from local dev origins plus configured frontend URL.
 const allowedOrigins = [
-  'http://localhost:3000',
   'http://localhost:8080',
   'http://localhost:5173',
   'http://localhost:5174',
